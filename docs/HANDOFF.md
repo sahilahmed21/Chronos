@@ -5,10 +5,10 @@
 
 | Pin | SHA |
 |-----|-----|
-| HEAD | `e6291f5c2c1f6957de84a64867ef496954b18be8` |
+| HEAD | `93880c530cbbc8c0887a8cdf2cd372430fd3808d` (handoff/CI refresh; includes `e6291f5` checker fix) |
 | Green code / planted `COMMIT` | `2b46ebb0c4216ead35a52352460a372e85ffae98` (do **not** re-pin to HEAD unless asked) |
 
-**Proof:** `ci / verify` green on `e6291f5` (and earlier on `2b46ebb` / `cd35c46`). Docker `cargo test --workspace --release` green. Local Docker `--seeds 1000` green on the fixed tree. Host MSVC `link.exe` still optional.
+**Proof:** `ci / verify` green on `93880c5` / `e6291f5` (and earlier on `2b46ebb` / `cd35c46`). Docker `cargo test --workspace --release` green. Local Docker `--seeds 1000` green. GitHub **1000-seed** swarm green via `workflow_dispatch` (`swarm_seeds=1000`) on `93880c5` — [run 32767856965](https://github.com/sahilahmed21/Chronos/actions/runs/32767856965). Host MSVC `link.exe` still optional.
 
 **G0:** preferred wild PROTOCOL not found. PLANTED pack remains G9. Hunt seed 281 was a false Linearizability fail (`Io` as definite miss).
 
@@ -72,7 +72,7 @@ Helpers live under `.git/` (not in the tree). `.git/rewrite_clean_commit.py` rew
 | v1 crates + CI + PLANTED + README | Done |
 | Seed 281 Linearizability hunt | Closed CHECKER; on `main` @ `e6291f5` |
 | Wild PROTOCOL pack | Not found; PLANTED remains G9 |
-| GitHub 1000-seed swarm | Push/PR = 32; schedule cron / `workflow_dispatch` with `swarm_seeds=1000` |
+| GitHub 1000-seed swarm | Done — [dispatch run 32767856965](https://github.com/sahilahmed21/Chronos/actions/runs/32767856965) (`swarm_seeds=1000`, `# coverage runs=1000`); cron `0 6 * * *` UTC still scheduled |
 | Post-v1 (TCP 3-node, membership, …) | Out of scope |
 
 Roadmap status: [roadmap/README.md](roadmap/README.md). Deliverable checklist: [roadmap/deliverable.md](roadmap/deliverable.md).
