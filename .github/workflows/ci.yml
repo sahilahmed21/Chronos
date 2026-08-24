@@ -7,6 +7,12 @@ on:
   schedule:
     - cron: "0 6 * * *"
   workflow_dispatch:
+    inputs:
+      swarm_seeds:
+        description: "Swarm seed count (push/PR default 32; use 1000 for nightly-equivalent)"
+        required: false
+        default: "32"
+        type: string
 
 env:
   CARGO_TERM_COLOR: always
@@ -46,6 +52,8 @@ jobs:
         run: |
           if [ "${{ github.event_name }}" = "schedule" ]; then
             echo "count=1000" >> "$GITHUB_OUTPUT"
+          elif [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "count=${{ github.event.inputs.swarm_seeds || '32' }}" >> "$GITHUB_OUTPUT"
           else
             echo "count=32" >> "$GITHUB_OUTPUT"
           fi

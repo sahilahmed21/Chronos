@@ -64,7 +64,8 @@ Fallback allowed by the original guide: if swarm finds nothing, ship a **documen
 Playbook: [../bugs/CLOSE-281.md](../bugs/CLOSE-281.md) **CLOSED** CLASS=CHECKER. PLANTED remains G9.
 
 - [x] Seed-281 triage: HARNESS heartbeat book + CHECKER `Io`-as-unknown ([../bugs/HUNT-2026-08-24.md](../bugs/HUNT-2026-08-24.md))
-- [x] Local Docker 1000-seed swarm green (2026-08-25). GitHub nightly should match after push.
+- [x] Local Docker 1000-seed swarm green (2026-08-25)
+- [ ] GitHub 1000-seed swarm green (schedule cron, or `workflow_dispatch` with `swarm_seeds=1000`)
 - Wild PROTOCOL pack with CLI `schedule.min` was **not found**; not a remaining v1 blocker.
 ## Interview bar
 

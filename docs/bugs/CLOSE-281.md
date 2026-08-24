@@ -189,10 +189,10 @@ docker run --rm -v c:/projects/Chronos:/work -w /work rust:1-bookworm \
 
 Update:
 
-- [ ] This file → Outcome
-- [ ] `HUNT-2026-08-24.md` → CLOSED + link to pack or “fixed as HARNESS”
-- [ ] `docs/HANDOFF.md` remaining table
-- [ ] `docs/roadmap/deliverable.md` / `goals.md` still-open bullets
+- [x] This file → Outcome
+- [x] `HUNT-2026-08-24.md` → CLOSED CLASS=CHECKER
+- [x] `docs/HANDOFF.md` remaining table
+- [x] `docs/roadmap/deliverable.md` / `goals.md` still-open bullets
 
 ---
 
