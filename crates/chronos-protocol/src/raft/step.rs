@@ -551,7 +551,15 @@ mod tests {
             from: NodeId(0),
             msg: ae_noop(1),
         });
-        assert!(effects.iter().any(|e| matches!(
+        assert!(!has_ae_success(&effects));
+        let mut after = Vec::new();
+        for id in append_ids(&effects) {
+            after.extend(follower.step(Event::IoComplete { id, result: Ok(()) }));
+        }
+        for id in fsync_ids(&effects) {
+            after.extend(follower.step(Event::IoComplete { id, result: Ok(()) }));
+        }
+        assert!(after.iter().any(|e| matches!(
             e,
             Effect::Send {
                 msg: Message::AppendEntriesResp { success: false, .. },
