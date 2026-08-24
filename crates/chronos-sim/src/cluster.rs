@@ -522,8 +522,28 @@ impl Cluster {
     }
 
     pub fn drain(&mut self) {
+        loop {
+            if self.has_live_leader() && !self.sched.has_non_timer() {
+                break;
+            }
+            if !self.step_once() {
+                break;
+            }
+        }
+        self.finish_checks();
+    }
+
+    /// Run until `max_ns` (or a check fail). Used by swarm/minify so extras
+    /// behind heartbeats still fire.
+    pub fn drain_horizon(&mut self) {
         while self.step_once() {}
         self.finish_checks();
+    }
+
+    fn has_live_leader(&self) -> bool {
+        self.nodes.iter().enumerate().any(|(i, n)| {
+            self.alive.get(i).copied().unwrap_or(false) && n.role() == Role::Leader
+        })
     }
 
     fn on_schedule(&self) -> bool {
@@ -1741,12 +1761,13 @@ mod tests {
         swarm.drain();
         swarm.inject_send(NodeId(0), NodeId(1), Message::Ping);
         swarm.drain();
+        let ping = delivery_token(NodeId(0), NodeId(1), &Message::Ping);
         let token = swarm
             .observed()
             .drops
             .iter()
             .copied()
-            .find(|t| t.from == NodeId(0) && t.to == NodeId(1))
+            .find(|t| *t == ping)
             .expect("ppm=1e6 must record a Ping loss token");
 
         let mut with_drop = Cluster::new(1, cfg.clone());

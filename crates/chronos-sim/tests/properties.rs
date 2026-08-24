@@ -140,7 +140,12 @@ fn planted_skip_vote_persist_fails_election_safety() {
     }
     assert!(saw_grant, "node 0 should grant before crash");
     cluster.inject_crash(NodeId(0));
-    assert!(cluster.step_once());
+    for _ in 0..10_000 {
+        if !cluster.alive(NodeId(0)) {
+            break;
+        }
+        assert!(cluster.step_once(), "heap idle before crash applied");
+    }
     assert!(!cluster.alive(NodeId(0)));
 
     cluster.inject_recover(NodeId(0));

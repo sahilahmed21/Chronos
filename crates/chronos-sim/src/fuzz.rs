@@ -369,7 +369,7 @@ pub(crate) fn drain_plan(
     for (at, event) in extras {
         cluster.inject_at(*at, event.clone());
     }
-    cluster.drain();
+    cluster.drain_horizon();
     cluster
 }
 

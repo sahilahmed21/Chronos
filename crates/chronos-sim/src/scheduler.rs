@@ -115,6 +115,16 @@ impl Scheduler {
         self.heap.peek().map(|item| item.time)
     }
 
+    pub fn peek_event(&self) -> Option<&WorldEvent> {
+        self.heap.peek().map(|item| &item.event)
+    }
+
+    pub fn has_non_timer(&self) -> bool {
+        self.heap
+            .iter()
+            .any(|item| !matches!(item.event, WorldEvent::TimerFired { .. }))
+    }
+
     /// `seq` is one counter for the run. Never reset. Never per-node.
     /// Times before `now` clamp to `now` so virtual time never moves backward.
     pub fn enqueue(&mut self, time: Timestamp, event: WorldEvent) {

@@ -620,7 +620,7 @@ fn run_schedule(
     for (at, event) in &extras {
         cluster.inject_at(*at, event.clone());
     }
-    cluster.drain();
+    cluster.drain_horizon();
     finish_report(
         job.input.seed,
         job.input.profile,

@@ -441,6 +441,7 @@ fn maybe_commit(node: &mut Node, effects: &mut Vec<Effect>) {
     if best > node.commit_index {
         node.commit_index = best;
         apply_committed(node, effects);
+        replicate_all(node, effects);
     }
 }
 

@@ -139,6 +139,8 @@ fn message_delay_triggers_election_then_progress() {
             jitter_max_ns: 0,
             net_delay_min_ns: 400_000_000,
             net_delay_max_ns: 400_000_000,
+            election_min_ns: 800_000_000,
+            election_max_ns: 900_000_000,
             ..SimConfig::default()
         },
     );
@@ -332,6 +334,8 @@ fn buggify_slow_fsync_still_safe() {
             jitter_max_ns: 0,
             buggify_slow_fsync: true,
             buggify_fsync_extra_ns: 150_000_000,
+            election_min_ns: 400_000_000,
+            election_max_ns: 500_000_000,
             ..SimConfig::default()
         },
     );
