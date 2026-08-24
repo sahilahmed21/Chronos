@@ -41,6 +41,21 @@ fn recover_all(cluster: &mut Cluster) {
     cluster.drain();
 }
 
+fn wait_leader(cluster: &mut Cluster) {
+    for i in 0..cluster.node_count() {
+        cluster.inject_recover(NodeId(i));
+    }
+    for _ in 0..100_000 {
+        if leader_of(cluster).is_some() {
+            return;
+        }
+        if !cluster.step_once() {
+            break;
+        }
+    }
+    let _ = leader_of(cluster).expect("leader");
+}
+
 fn leader_of(cluster: &Cluster) -> Option<NodeId> {
     (0..cluster.node_count())
         .map(NodeId)
@@ -144,7 +159,7 @@ fn message_delay_triggers_election_then_progress() {
             ..SimConfig::default()
         },
     );
-    recover_all(&mut cluster);
+    wait_leader(&mut cluster);
     assert_election_safety(&cluster);
     let leader = leader_of(&cluster).expect("leader");
     cluster.inject_client(leader, put_req());
