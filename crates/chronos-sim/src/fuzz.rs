@@ -585,7 +585,7 @@ fn parse_hex(s: &str) -> Option<Vec<u8>> {
         return None;
     }
     let mut out = Vec::with_capacity(s.len() / 2);
-    for chunk in s.as_bytes().chunks_exact(2) {
+    for chunk in s.as_bytes().as_chunks::<2>().0 {
         let byte = std::str::from_utf8(chunk).ok()?;
         out.push(u8::from_str_radix(byte, 16).ok()?);
     }

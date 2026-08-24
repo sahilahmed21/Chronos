@@ -158,7 +158,7 @@ pub(crate) fn sha256(data: &[u8]) -> [u8; 32] {
         padded.push(0);
     }
     padded.extend_from_slice(&bit_len.to_be_bytes());
-    for chunk in padded.chunks_exact(64) {
+    for chunk in padded.as_chunks::<64>().0 {
         sha256_block(&mut h, chunk);
     }
     let mut out = [0u8; 32];
