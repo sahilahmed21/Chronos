@@ -152,10 +152,13 @@ fn message_delay_triggers_election_then_progress() {
         SimConfig {
             n: 3,
             jitter_max_ns: 0,
+            // Delay > heartbeat so a leader's AEs miss election timeout.
+            // Election must still exceed one RequestVote RTT (2 * delay).
             net_delay_min_ns: 400_000_000,
             net_delay_max_ns: 400_000_000,
-            election_min_ns: 800_000_000,
-            election_max_ns: 900_000_000,
+            election_min_ns: 2_000_000_000,
+            election_max_ns: 2_500_000_000,
+            max_ns: 30_000_000_000,
             ..SimConfig::default()
         },
     );
