@@ -1,8 +1,8 @@
 # P7 — Bug discovery
 
-**Status:** tooling implemented; hunt blocked on `link.exe` / git / runtime G8  
+**Status:** PLANTED pack shipped (harness proof). Hunt seed 281 closed CLASS=CHECKER ([../bugs/HUNT-2026-08-24.md](../bugs/HUNT-2026-08-24.md)). No wild PROTOCOL pack.  
 **Serves:** G9  
-**Must not:** “fix” paper-Raft-vs-fsync-lie and call it a DST win; silently retune swarm until it goes green without a writeup
+**Must not:** “fix” paper-Raft-vs-fsync-lie and call it a DST win; silently retune swarm until it goes green without a writeup; enable `skip_vote_persist` to force a minify
 
 **Done when:** `docs/bugs/<name>/` exists with seed, commit, digest, explanation — real find **or** labeled near-miss.
 
@@ -60,6 +60,7 @@ If swarm is clean:
 
 - [x] `--replay` verifies digest, check, config, extras (`fail_file_header` / `verify_replay`)
 - [x] Pack template and CLASS taxonomy in `docs/bugs/`
-- [ ] Seed replays on a linked binary (blocked: no `link.exe`)
-- [ ] Honest classification of a real hunt (blocked: hunt not run)
-- [ ] Writeup a stranger can read (blocked: no finding yet)
+- [x] Seed replays on a linked binary (Linux CI + Docker `rust:1-bookworm`)
+- [x] Honest hunt run + writeup for PLANTED fallback ([../bugs/2026-08-24-planted-skip-vote-persist/](../bugs/2026-08-24-planted-skip-vote-persist/))
+- [x] Hunt log for seed 281 — CLOSED CLASS=CHECKER ([../bugs/HUNT-2026-08-24.md](../bugs/HUNT-2026-08-24.md))
+- [x] Seed 281 triaged: HARNESS heartbeat book + CHECKER `Io`-as-unknown; no PROTOCOL pack

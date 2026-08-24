@@ -1,6 +1,6 @@
 # P8 — Minimization
 
-**Status:** tooling implemented; pack `schedule.min` for wild finds blocked on classified P7 hunt / `link.exe`. PLANTED pack linked for P9.  
+**Status:** tooling implemented and exercised in Linux CI. PLANTED pack has an inject-sequence `schedule.min` (not CLI minify). Heartbeat delays are in `ReplayBook` so Recorded minify matches live. Hunt 281 closed CHECKER (`MINIFY CLEAN` after oracle fix).  
 **Serves:** G10  
 **Must not:** delete Raft internals at random; rely on PRNG to recreate dropped faults; enable `skip_vote_persist` from the CLI
 
@@ -54,4 +54,5 @@
 
 - [x] Schedule, not “delete Raft messages blindly”
 - [x] Replay without hoping the RNG lines up
-- [ ] Minimized artifact in `docs/bugs/` (blocked: no classified P7 pack; tests never linked here)
+- [x] Minimized artifact path exists for PLANTED pack (`docs/bugs/2026-08-24-planted-skip-vote-persist/schedule.min` = inject sequence)
+- [ ] Wild PROTOCOL pack `schedule.min` from `chronos-sim --minify` (optional; only after a classified swarm fail)

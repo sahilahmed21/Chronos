@@ -122,9 +122,9 @@ Do **not** elect a leader. One node. Client ops go to a local log that is the WA
 
 ## Phase exit checklist
 
-- [ ] No Raft RPCs, no leader election
-- [ ] No Tokio
-- [ ] WAL encode/decode/scan tests
-- [ ] Put/Get via step + fsync complete
-- [ ] Recover drops unsynced Put
-- [ ] Sim stub and node disk both drive the same `step`
+- [x] No Raft RPCs, no leader election *(at P1 exit; Raft added in P3)*
+- [x] No Tokio
+- [x] WAL encode/decode/scan tests
+- [x] Put/Get via step + fsync complete
+- [x] Recover drops unsynced Put
+- [x] Sim stub and node disk both drive the same `step`

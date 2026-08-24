@@ -1,10 +1,13 @@
 # TDD evidence: P9 core-review coverage n_other
 
+> **Superseded for runtime proof (2026-08-24):** tests are green under Linux CI and Docker `rust:1-bookworm`. Linker / “not a git repo” notes below are session archaeology.
+
 ## Source plan
 
 Core review Minor: `coverage_flags` silently dropped `n ∉ {3,5}`. No `*.plan.md`.
 
-Workspace is not a git repository — checkpoint commits skipped.
+Workspace was not a git repository during this TDD session — checkpoint commits skipped.
+
 
 ## User journeys
 

@@ -95,9 +95,9 @@
 
 ## Phase exit checklist
 
-- [ ] One leader, no faults
-- [ ] Logs match on committed entries
-- [ ] Get/Put work
-- [ ] Vote Send never in the same batch as its persist Fsync
-- [ ] AE success Send never before fsync Ok
-- [ ] No snapshots, no membership
+- [x] One leader, no faults
+- [x] Logs match on committed entries
+- [x] Get/Put work
+- [x] Vote Send never in the same batch as its persist Fsync
+- [x] AE success Send never before fsync Ok
+- [x] No snapshots, no membership

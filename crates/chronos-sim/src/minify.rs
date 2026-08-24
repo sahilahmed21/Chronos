@@ -949,6 +949,39 @@ mod tests {
     }
 
     #[test]
+    fn seed_281_full_recorded_schedule_matches_live_check() {
+        let seed = 281u64;
+        let plan = swarm_plan(seed);
+        let swarm = drain_plan(seed, &plan.cfg, &plan.extras, &[]);
+        let swarm_check = swarm.check_fail().map(|f| f.check);
+        assert_eq!(
+            swarm_check, None,
+            "seed 281 live must be clean after Io-as-unknown checker fix"
+        );
+        let atoms = atomize(&plan.extras, swarm.observed());
+        let job = MinifyJob {
+            input: MinifyInput {
+                seed,
+                profile: plan.profile,
+                cfg: plan.cfg,
+                extras: plan.extras,
+            },
+            skip_vote_persist: Vec::new(),
+        };
+        let report = run_schedule(
+            &job,
+            &atoms,
+            Some(&swarm.observed().book),
+            DelayBind::Recorded,
+        );
+        assert_eq!(
+            report.check.as_ref().map(|f| f.check),
+            swarm_check,
+            "seed 281 DelayBind::Recorded must match live CheckName"
+        );
+    }
+
+    #[test]
     fn dropping_the_causal_atom_clears_the_oracle() {
         let causal = Atom::FailNextFsync {
             orig: 0,

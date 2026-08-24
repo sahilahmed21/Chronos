@@ -1,10 +1,13 @@
 # TDD evidence: P6 core-review fixes
 
+> **Superseded for runtime proof (2026-08-24):** tests are green under Linux CI and Docker `rust:1-bookworm`. Linker / “not a git repo” notes below are session archaeology.
+
 ## Source plan
 
 Journeys were derived from the P6 core review (NEEDS FIX / NOT READY), not from a `*.plan.md` file. Locked P6 architecture was not redesigned.
 
-This workspace is not a git repository (`git rev-parse` fails). Checkpoint commits were skipped.
+This workspace was not a git repository during this TDD session (`git rev-parse` failed). Checkpoint commits were skipped.
+
 
 ## User journeys
 

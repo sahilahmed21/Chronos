@@ -1,6 +1,6 @@
 # P6 — Fuzzing
 
-**Status:** implemented  
+**Status:** implemented (PR CI: 32 seeds; nightly/local hunt: 1000 — see [../bugs/HUNT-2026-08-24.md](../bugs/HUNT-2026-08-24.md))  
 **Serves:** G8  
 **Must not:** require 10k seeds before the first swarm run; default-on fsync-lie; liveness flag on brutal partitions
 

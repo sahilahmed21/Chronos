@@ -126,13 +126,15 @@ pub struct DeliveryToken {
     pub hash: [u8; 32],
 }
 
-/// Delays captured from a probabilistic drain. Bound to the *full* recorded
-/// run only (`DelayBind::Recorded`). Subset DD uses `DelayBind::Defaults`.
+/// Delays captured from a probabilistic drain (send, I/O, election, heartbeat).
+/// Bound to the *full* recorded run only (`DelayBind::Recorded`). Subset DD
+/// uses `DelayBind::Defaults`.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct ReplayBook {
     pub send_delay: BTreeMap<SendKey, VecDeque<u64>>,
     pub io_delay: BTreeMap<(u8, u64, u8), VecDeque<u64>>,
     pub election: BTreeMap<(u8, u64), VecDeque<u64>>,
+    pub heartbeat: BTreeMap<(u8, u64), VecDeque<u64>>,
 }
 
 /// Whether schedule replay may consume `ReplayBook` FIFOs.
@@ -595,13 +597,9 @@ impl Cluster {
         let life = self.idx(from).map(|i| self.life[i]).unwrap_or(0);
         let dur = match kind {
             TimerKind::Election => self.election_delay(from, life),
-            TimerKind::Heartbeat => self.cfg.heartbeat_ns,
+            TimerKind::Heartbeat => self.heartbeat_delay(from, life),
         };
-        let jit = match kind {
-            TimerKind::Election => 0,
-            TimerKind::Heartbeat => self.jitter(),
-        };
-        let at = Timestamp(now.0.saturating_add(dur).saturating_add(jit));
+        let at = Timestamp(now.0.saturating_add(dur));
         self.sched.enqueue(
             at,
             WorldEvent::TimerFired {
@@ -634,6 +632,27 @@ impl Cluster {
                 };
                 let total = dur.saturating_add(self.jitter());
                 queue_push(&mut self.observed.book.election, key, total);
+                total
+            }
+        }
+    }
+
+    fn heartbeat_delay(&mut self, node: NodeId, life: u64) -> u64 {
+        let key = (node.0, life);
+        let fallback = self.cfg.heartbeat_ns;
+        match &mut self.policy {
+            DrainPolicy::Schedule {
+                bind_delays, book, ..
+            } => {
+                if *bind_delays {
+                    queue_pop(&mut book.heartbeat, key).unwrap_or(fallback)
+                } else {
+                    fallback
+                }
+            }
+            DrainPolicy::Swarm => {
+                let total = fallback.saturating_add(self.jitter());
+                queue_push(&mut self.observed.book.heartbeat, key, total);
                 total
             }
         }

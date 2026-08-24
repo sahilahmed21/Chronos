@@ -2,6 +2,10 @@
 
 The product goal is not “implement Raft.” It is **architect away nondeterminism**, then use that to produce a replayable correctness artifact.
 
+## Status (2026-08-25)
+
+G1–G11 tooling and the PLANTED G9 fallback are **shipped**. G0’s preferred wild PROTOCOL path was closed as **CHECKER** on hunt seed 281 (false Linearizability: `Io` treated as a definite miss). PLANTED remains G9. See [bugs/HUNT-2026-08-24.md](../bugs/HUNT-2026-08-24.md) and [bugs/CLOSE-281.md](../bugs/CLOSE-281.md). There is no remaining “281 still open” item.
+
 ## G0 — Ultimate goal
 
 Find (or, as fallback, honestly document a production-class near-miss) a **schedule-dependent** safety violation that a conventional unit-test suite would not write by hand — with:

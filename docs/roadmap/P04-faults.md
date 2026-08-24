@@ -79,7 +79,7 @@
 
 ## Phase exit checklist
 
-- [ ] Named scenario tests with written predictions
-- [ ] Torn suffix ≠ fsync-lie
-- [ ] Default fuzz knobs: delay, crash, torn suffix, fsync Err, partition — lie off
-- [ ] Checkers not required yet, but nothing obviously two-leaders-same-term in these scripts (manual or debug print OK until P5)
+- [x] Named scenario tests with written predictions
+- [x] Torn suffix ≠ fsync-lie
+- [x] Default fuzz knobs: delay, crash, torn suffix, fsync Err, partition — lie off
+- [x] Checkers not required yet, but nothing obviously two-leaders-same-term in these scripts (manual or debug print OK until P5)

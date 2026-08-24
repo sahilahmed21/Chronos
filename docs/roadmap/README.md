@@ -45,10 +45,8 @@ P8 Minify  →  P9 Product
 
 P7 is the punchline. P8 makes it readable. P9 makes it a product. P1–P6 exist so P7 is possible.
 
-## Current state
+## Current state (2026-08-24)
 
-**P1–P8 tooling implemented** (protocol, sim, Raft, faults, checkers, swarm, replay, minify).  
-**P9 product** in progress / landing: README, Linux CI, `--coverage`, PLANTED bug pack linked.  
-Local Windows may lack `link.exe`; Linux CI is the required green gate. Do not claim G7–G10 green from clippy alone.
+**P1–P9 shipped.** Repo on GitHub; `ci / verify` green; planted `COMMIT` = `2b46ebb…`; Docker + Linux CI prove `cargo test --workspace`. PLANTED pack is the v1 harness proof.
 
-Next: keep CI green; fill `COMMIT` after `git init`; optional wild PROTOCOL pack if swarm finds one.
+**Hunt 281:** CLOSED CLASS=CHECKER (plus HARNESS heartbeat recording). No wild PROTOCOL pack. Local Docker 1000-seed swarm green 2026-08-25. PLANTED remains G9. See [../bugs/HUNT-2026-08-24.md](../bugs/HUNT-2026-08-24.md).

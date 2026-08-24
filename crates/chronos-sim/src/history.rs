@@ -135,8 +135,14 @@ fn spec_apply(map: &mut LinState, cmd: &Cmd) -> ClientResp {
 fn is_definite_fail(resp: &ClientResp) -> bool {
     matches!(
         resp,
-        ClientResp::Err(ClientError::Io | ClientError::Invalid | ClientError::NotLeader)
+        ClientResp::Err(ClientError::Invalid | ClientError::NotLeader)
     )
+}
+
+/// `Io` may have been applied (fsync failed after append/replicate). Spec:
+/// unknown/timeout-after-possible-apply stays incomplete, not a definite miss.
+fn is_unknown(resp: &ClientResp) -> bool {
+    matches!(resp, ClientResp::Err(ClientError::Io))
 }
 
 fn search(
@@ -165,6 +171,16 @@ fn search(
         match ops[i].result.as_ref() {
             Some(resp) if is_definite_fail(resp) => {
                 if search(state, rest, ops, preds, cache) {
+                    return true;
+                }
+            }
+            Some(resp) if is_unknown(resp) => {
+                if search(state, rest, ops, preds, cache) {
+                    return true;
+                }
+                let mut next = state.clone();
+                spec_apply(&mut next, &ops[i].cmd);
+                if search(&next, rest, ops, preds, cache) {
                     return true;
                 }
             }
@@ -242,6 +258,27 @@ mod tests {
         h.complete(Timestamp(4), 0, ClientId(1), RequestId(2), ok(b"v"))
             .unwrap();
         assert!(h.linearizable().is_err());
+    }
+
+    #[test]
+    fn io_put_then_get_same_value_is_linearizable() {
+        let mut h = History::new();
+        h.invoke(Timestamp(1), 0, &put_req(1, b"a"));
+        h.complete(
+            Timestamp(2),
+            0,
+            ClientId(1),
+            RequestId(1),
+            ClientResp::Err(ClientError::Io),
+        )
+        .unwrap();
+        h.invoke(Timestamp(3), 0, &get_req(2, 2));
+        h.complete(Timestamp(4), 0, ClientId(2), RequestId(2), ok(b"a"))
+            .unwrap();
+        assert!(
+            h.linearizable().is_ok(),
+            "Io is unknown, not a definite miss; Get may observe the Put"
+        );
     }
 
     #[test]

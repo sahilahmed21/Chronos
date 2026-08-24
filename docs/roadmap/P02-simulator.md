@@ -96,8 +96,8 @@ Use a **toy protocol** (ping/echo or the P1 single-node KV) so determinism is pr
 
 ## Phase exit checklist
 
-- [ ] Global seq, not per-node
-- [ ] SHA-256 traces, no `std::hash`
-- [ ] Same seed twice → same digest
-- [ ] Still no Raft
-- [ ] HashMap still absent from protocol and sim
+- [x] Global seq, not per-node
+- [x] SHA-256 traces, no `std::hash`
+- [x] Same seed twice → same digest
+- [x] Still no Raft *(at P2 exit; Raft added in P3)*
+- [x] HashMap still absent from protocol and sim

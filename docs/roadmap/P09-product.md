@@ -1,6 +1,6 @@
 # P9 — Product quality
 
-**Status:** implemented (tooling + docs + CI + coverage + PLANTED pack); **verified green** blocked on Linux CI / local `link.exe`  
+**Status:** verified for push/PR path — Linux `ci / verify` green; Docker workspace tests green; PLANTED pack + coverage + README. Hunt 281 closed CHECKER; local 1000-seed swarm green 2026-08-25.  
 **Serves:** G11  
 **Must not:** claim fsync-lie / Byzantine / Jepsen coverage; hide non-goals
 
@@ -73,9 +73,11 @@
 ## Phase exit checklist
 
 - [x] README standalone (includes PLANTED reproduce via `cargo test`)
-- [x] CI workflow present (HashMap gates + swarm); **first green run still required on GitHub**
+- [x] CI workflow present; **`ci / verify` green** on GitHub (push/PR: fmt, release tests, clippy, gates, 32-seed swarm)
 - [x] Coverage output (`--seeds … --coverage`)
 - [x] Bug artifact linked (PLANTED; not a wild PROTOCOL find)
 - [x] Non-goals stated
+- [x] `COMMIT` filled (`2b46ebb…`); Docker/Linux `cargo test --workspace` green
+- [x] Nightly 1000-seed swarm green locally (Docker 2026-08-25); GitHub schedule should match after push
 
-**v1 verified** only after: Linux CI green once, linker-capable `cargo test --workspace`, and `COMMIT` filled after `git init`.
+**v1 product surface:** verified on the push/PR path. G9 = PLANTED. Hunt 281 closed CHECKER; local 1000-seed swarm green.

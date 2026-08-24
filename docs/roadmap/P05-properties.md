@@ -77,8 +77,8 @@ On fail: halt, dump seed, digest, check name, node snapshots.
 
 ## Phase exit checklist
 
-- [ ] All five safety properties
-- [ ] Persist-before-send/ack
-- [ ] Planted votedFor bug fails
-- [ ] Linearizability on client history
-- [ ] Liveness isolated
+- [x] All five safety properties
+- [x] Persist-before-send/ack
+- [x] Planted votedFor bug fails
+- [x] Linearizability on client history
+- [x] Liveness isolated

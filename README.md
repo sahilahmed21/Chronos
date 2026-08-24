@@ -12,7 +12,14 @@ cargo test --workspace
 cargo clippy -p chronos-protocol -p chronos-sim --all-targets -- -D warnings
 ```
 
-On Windows you need the MSVC linker (`link.exe` via Visual Studio Build Tools). Linux CI is the required gate (`.github/workflows/ci.yml`).
+**Linux CI** (`.github/workflows/ci.yml`) is the required gate — `ci / verify` is green on `main`.
+
+On Windows without MSVC `link.exe`, use Docker (forward slashes on the mount):
+
+```text
+docker run --rm -v c:/projects/Chronos:/work -w /work -e RUST_TEST_THREADS=1 \
+  rust:1-bookworm cargo test --workspace --release
+```
 
 Determinism source gates (no `HashMap` in protocol/sim; no `std::fs` / `Instant` / … in protocol):
 
@@ -78,6 +85,8 @@ cargo test -p chronos-sim --test properties unplanted_solo_campaign_passes_persi
 ```
 
 Wild finds (when present) use `chronos-sim --seed` / `--replay` / `--minify` as in the pack README.
+
+**Hunt 281 (CLOSED, CLASS=CHECKER):** [docs/bugs/HUNT-2026-08-24.md](docs/bugs/HUNT-2026-08-24.md) — false Linearizability (`Io` treated as a definite miss). `--seed 281` is clean; local 1000-seed swarm green. PLANTED pack remains G9 (not a wild PROTOCOL find).
 ## Docs
 
 | Doc | Role |
@@ -86,7 +95,8 @@ Wild finds (when present) use `chronos-sim --seed` / `--replay` / `--minify` as 
 | [docs/roadmap/](docs/roadmap/README.md) | Goals G0–G11, phases P1–P9 |
 | [docs/roadmap/deliverable.md](docs/roadmap/deliverable.md) | v1 done definition |
 | [docs/00-project-guide.md](docs/00-project-guide.md) | Interview cheat-sheet + original guide |
-| [docs/HANDOFF.md](docs/HANDOFF.md) | Agent session handoff (may lag; prefer roadmap status) |
+| [docs/HANDOFF.md](docs/HANDOFF.md) | Current agent handoff (2026-08-25) |
+| [docs/bugs/HUNT-2026-08-24.md](docs/bugs/HUNT-2026-08-24.md) | 1000-seed hunt log (seed 281) |
 
 ## License
 

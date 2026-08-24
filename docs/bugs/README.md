@@ -50,19 +50,31 @@ Stdout is the verdict line, then the process exits. It never prints hunt `FAIL`/
 
 `scripts/repro.ps1 <seed>` / `scripts/repro.sh <seed>` runs the seed twice and compares hunt status lines (`ok`/`FAIL`/`ABORT`). That is G8 for a seed, not `--replay`.
 
-`COMMIT` is unsatisfiable until this tree is a git repository. Do not invent a hash.
+`COMMIT` must be a real `git rev-parse` of a tree that reproduces. Do not invent a hash. The shipped PLANTED pack pins the first fully green CI code commit (`2b46ebb…`), not necessarily `HEAD`.
 
-## Hunt (blocked on linker here)
+## Hunt
+
+On Windows without `link.exe`, run under Docker (forward slashes on the drive mount):
+
+```text
+docker run --rm -v c:/projects/Chronos:/work -w /work rust:1-bookworm \
+  cargo run -p chronos-sim --release -- --seeds 1000 --start 1 --out traces --coverage
+```
+
+Or use the scripts when a linker is available:
 
 ```text
 scripts/fuzz.ps1 100
 scripts/fuzz.sh 100
 ```
 
-Writes `traces/fail-<seed>.trace` and `traces/fail-<seed>.planned` on CheckFail. Start at 100 seeds; 1000 if that batch is clean. 10k is a stretch goal.
+Writes `traces/fail-<seed>.trace` and `traces/fail-<seed>.planned` on CheckFail. Start at 100 seeds; 1000 if that batch is clean. 10k is a stretch goal. Push/PR CI runs 32 seeds; nightly schedule (`0 6 * * *` UTC) runs 1000.
 
 `chronos-sim --minify --seed S --out traces` writes `traces/fail-S.min` (schedule.min text). Success is the same `CheckName`, not D13 digest equality. Copy that file into the pack as `schedule.min`. Do not enable `skip_vote_persist` on this path.
 
 If the swarm is honestly clean, ship a **PLANTED** pack from `crates/chronos-sim/tests/properties.rs` (`planted_skip_vote_persist_fails_election_safety`). The README must say it was not a wild find.
 
-Shipped example: [2026-08-24-planted-skip-vote-persist/](2026-08-24-planted-skip-vote-persist/).
+Shipped example: [2026-08-24-planted-skip-vote-persist/](2026-08-24-planted-skip-vote-persist/). `COMMIT` pins green code SHA `2b46ebb…` (not necessarily `HEAD`).
+
+Hunt log: [HUNT-2026-08-24.md](HUNT-2026-08-24.md) — **CLOSED** CLASS=CHECKER (seed 281 false Linearizability).  
+Close playbook: [CLOSE-281.md](CLOSE-281.md). No PROTOCOL directory.
