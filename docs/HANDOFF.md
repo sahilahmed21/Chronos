@@ -5,7 +5,7 @@
 
 | Pin | SHA |
 |-----|-----|
-| HEAD | `93880c530cbbc8c0887a8cdf2cd372430fd3808d` (handoff/CI refresh; includes `e6291f5` checker fix) |
+| HEAD | `56baf32b4452952c010fb15c60af26f87a9f81d2` (docs record of GitHub 1000-seed; code fix in `e6291f5`, dispatch-capable CI in `93880c5`) |
 | Green code / planted `COMMIT` | `2b46ebb0c4216ead35a52352460a372e85ffae98` (do **not** re-pin to HEAD unless asked) |
 
 **Proof:** `ci / verify` green on `93880c5` / `e6291f5` (and earlier on `2b46ebb` / `cd35c46`). Docker `cargo test --workspace --release` green. Local Docker `--seeds 1000` green. GitHub **1000-seed** swarm green via `workflow_dispatch` (`swarm_seeds=1000`) on `93880c5` — [run 32767856965](https://github.com/sahilahmed21/Chronos/actions/runs/32767856965). Host MSVC `link.exe` still optional.
