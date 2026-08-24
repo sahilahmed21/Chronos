@@ -541,9 +541,10 @@ impl Cluster {
     }
 
     fn has_live_leader(&self) -> bool {
-        self.nodes.iter().enumerate().any(|(i, n)| {
-            self.alive.get(i).copied().unwrap_or(false) && n.role() == Role::Leader
-        })
+        self.nodes
+            .iter()
+            .enumerate()
+            .any(|(i, n)| self.alive.get(i).copied().unwrap_or(false) && n.role() == Role::Leader)
     }
 
     fn on_schedule(&self) -> bool {
