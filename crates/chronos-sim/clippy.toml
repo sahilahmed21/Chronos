@@ -1,0 +1,5 @@
+# D6, D13. Sim iteration is what the trace hash sees.
+disallowed-types = [
+    { path = "std::collections::HashMap", reason = "D6: BTreeMap in sim" },
+    { path = "std::collections::HashSet", reason = "D6: BTreeSet in sim" },
+]

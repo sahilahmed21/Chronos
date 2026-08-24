@@ -1,0 +1,2 @@
+# Replace with format_planned_schedule(swarm_plan(seed).extras)
+# or the sibling traces/fail-<seed>.planned from a hunt dump.

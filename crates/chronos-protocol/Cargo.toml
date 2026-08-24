@@ -1,0 +1,11 @@
+[package]
+name = "chronos-protocol"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "Pure Raft/KV step function. No I/O, no clock, no RNG."
+
+[lints]
+workspace = true
+

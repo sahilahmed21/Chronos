@@ -1,0 +1,18 @@
+# Planted schedule (properties.rs election-safety scenario)
+
+Derived from `planted_skip_vote_persist_fails_election_safety` (Cluster seed 5).
+Not a `swarm_plan` dump.
+
+hook skip_vote_persist node=0
+partition 1->2 cut
+partition 0->2 cut
+recover 0,1,2
+cancel election timers on 0 and 2
+fire election timer on 1
+wait until node 0 grants a vote
+crash 0
+recover 0
+partition 0->1 cut
+partition 0->2 heal
+fire election timer on 2
+expect ElectionSafety

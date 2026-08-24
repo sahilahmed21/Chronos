@@ -1,0 +1,10 @@
+/target
+**/*.rs.bk
+fail-*.trace
+fail-*.planned
+fail-*.min
+traces/
+.idea/
+.vscode/
+rustup-init.exe
+chronos.wal

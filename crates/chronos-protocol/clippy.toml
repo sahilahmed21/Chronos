@@ -1,0 +1,15 @@
+# D6, D15, D16. See docs/02-architecture.md.
+disallowed-types = [
+    { path = "std::collections::HashMap", reason = "D6: BTreeMap only" },
+    { path = "std::collections::HashSet", reason = "D6: BTreeSet only" },
+    { path = "std::time::Instant", reason = "D15: protocol has no clock" },
+    { path = "std::time::SystemTime", reason = "D15: protocol has no clock" },
+    { path = "std::fs::File", reason = "I/O is an Effect, not a call" },
+    { path = "std::net::TcpStream", reason = "I/O is an Effect, not a call" },
+    { path = "std::net::UdpSocket", reason = "I/O is an Effect, not a call" },
+    { path = "std::thread::JoinHandle", reason = "no threads in protocol" },
+]
+disallowed-methods = [
+    { path = "std::thread::spawn", reason = "no threads in protocol" },
+    { path = "std::thread::sleep", reason = "timers are ArmTimer effects" },
+]

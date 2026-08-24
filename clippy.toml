@@ -1,0 +1,5 @@
+# Do not put Instant / fs / net / HashMap bans here: chronos-node is the
+# production interpreter and is allowed those types.
+# Gates live next to the crates that must obey them:
+#   crates/chronos-protocol/clippy.toml
+#   crates/chronos-sim/clippy.toml
