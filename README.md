@@ -36,6 +36,16 @@ Design reference: [docs/02-architecture.md](docs/02-architecture.md).
 
 ---
 
+## Results
+
+- **Determinism:** `cargo run -p chronos-sim --release -- --seed 7` twice produces the same SHA-256 digest (no host paths or wall clock in the hash).
+- **CI:** `ci / verify` on `main` runs format checks, `cargo test --workspace --release`, clippy (`-D warnings`), determinism gates, and a swarm batch — [workflow](https://github.com/sahilahmed21/Chronos/actions/workflows/ci.yml).
+- **Swarm at scale:** a **1000-seed** run with coverage completed successfully on GitHub Actions ([example run](https://github.com/sahilahmed21/Chronos/actions/runs/32767856965); log reports `# coverage runs=1000`).
+- **Harness proof:** skipping durable `votedFor` persist fails Election Safety; the unplanted control stays clean. Pack: [docs/bugs/2026-08-24-planted-skip-vote-persist/](docs/bugs/2026-08-24-planted-skip-vote-persist/). The hook is never enabled in swarm or CLI minify.
+- **Oracle hardening:** a swarm Linearizability failure on seed 281 was traced to treating fsync `Io` errors as definite misses when the put may already have applied. The checker now treats `Io` as unknown (apply or skip). After the fix, seed 281 and the 1000-seed batch are clean. Notes: [docs/bugs/HUNT-2026-08-24.md](docs/bugs/HUNT-2026-08-24.md).
+
+---
+
 ## Build and test
 
 ```bash
