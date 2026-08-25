@@ -8,3 +8,5 @@ traces/
 .vscode/
 rustup-init.exe
 chronos.wal
+
+docs/interview/
