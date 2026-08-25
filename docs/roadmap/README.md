@@ -10,6 +10,7 @@ If this folder and [../02-architecture.md](../02-architecture.md) disagree, **th
 |------|------------|
 | [goals.md](goals.md) | Ultimate goal, sub-goals, acceptance, mapping to phases |
 | [deliverable.md](deliverable.md) | What “v1 shipped” looks like (artifacts, not vibes) |
+| [completion.md](completion.md) | **Goals achieved + why v1 is complete / successful** |
 | [P01-foundation.md](P01-foundation.md) … [P09-product.md](P09-product.md) | Subphases → steps → substeps → exit checks |
 
 IDs:
@@ -45,8 +46,8 @@ P8 Minify  →  P9 Product
 
 P7 is the punchline. P8 makes it readable. P9 makes it a product. P1–P6 exist so P7 is possible.
 
-## Current state (2026-08-24)
+## Current state
 
-**P1–P9 shipped.** Repo on GitHub; `ci / verify` green; planted `COMMIT` = `2b46ebb…`; Docker + Linux CI prove `cargo test --workspace`. PLANTED pack is the v1 harness proof.
+**P1–P9 shipped. v1 complete** — see [completion.md](completion.md). Repo on GitHub; `ci / verify` green; planted `COMMIT` = `2b46ebb…`; Docker + Linux CI prove `cargo test --workspace`. PLANTED pack is the v1 harness proof.
 
-**Hunt 281:** CLOSED CLASS=CHECKER (plus HARNESS heartbeat recording). No wild PROTOCOL pack. Local Docker 1000-seed swarm green 2026-08-25. PLANTED remains G9. See [../bugs/HUNT-2026-08-24.md](../bugs/HUNT-2026-08-24.md).
+**Hunt 281:** CLOSED as a checker false fail (plus heartbeat recording). No wild PROTOCOL pack. 1000-seed swarm green locally and on GitHub Actions. PLANTED remains G9. See [../bugs/HUNT-2026-08-24.md](../bugs/HUNT-2026-08-24.md).

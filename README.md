@@ -149,6 +149,7 @@ Disk model: process-visible buffer vs durable watermark; torn writes only past t
 | [docs/02-architecture.md](docs/02-architecture.md) | Locked design (D1–D17) |
 | [docs/roadmap/](docs/roadmap/README.md) | Goals and phase sequence |
 | [docs/roadmap/deliverable.md](docs/roadmap/deliverable.md) | v1 definition of done |
+| [docs/roadmap/completion.md](docs/roadmap/completion.md) | Goals achieved and why v1 is complete |
 | [docs/bugs/](docs/bugs/README.md) | Finding packs and hunt notes |
 
 ---
