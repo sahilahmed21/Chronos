@@ -9,4 +9,11 @@ traces/
 rustup-init.exe
 chronos.wal
 
+docs/bugs/
+docs/findings/
 docs/interview/
+docs/interview-mastery/
+docs/plan/
+docs/roadmap/
+docs/testing/
+docs/HANDOFF.md
