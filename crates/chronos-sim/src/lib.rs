@@ -20,9 +20,9 @@ pub use cluster::{
 pub use fuzz::{
     aggregate_coverage, coverage_flags, coverage_observed_flags, coverage_profile_flags,
     encode_config, fail_file_header, format_coverage_table, format_fail_file,
-    format_planned_schedule, format_replay_line, run_plan, run_seed, seed_from_fail_file,
-    swarm_plan, verify_replay, Coverage, CoverageSummary, FailFileHeader, FaultConfig, Profile,
-    ReplayVerdict, RunReport, SwarmPlan,
+    format_planned_schedule, format_replay_line, run_plan, run_seed, run_seed_mutant,
+    seed_from_fail_file, swarm_plan, verify_replay, Coverage, CoverageSummary, FailFileHeader,
+    FaultConfig, Profile, ReplayVerdict, RunReport, SwarmPlan,
 };
 pub use history::History;
 pub use minify::{

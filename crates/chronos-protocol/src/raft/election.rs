@@ -6,10 +6,15 @@
 use crate::effect::Effect;
 use crate::event::Message;
 use crate::raft::replication;
-use crate::raft::state::{IoKind, Node, PersistSpec, Role, VoteWork};
+use crate::raft::state::{IoKind, Mutant, Node, PersistSpec, Role, VoteWork};
 use crate::types::{Index, NodeId, Term};
 use crate::wal::record::{LogEntry, LogPayload};
 
+/// Handles the election timeout timer firing.
+///
+/// If the node is not already a leader, it increments its term, transitions to the
+/// Candidate role, votes for itself, and persists this state change to disk before
+/// sending `RequestVote` messages (unless `skip_vote_persist` is enabled).
 pub(crate) fn on_election_timeout(node: &mut Node) -> Vec<Effect> {
     if node.role == Role::Leader {
         return Vec::new();
@@ -31,7 +36,7 @@ pub(crate) fn on_election_timeout(node: &mut Node) -> Vec<Effect> {
         &mut effects,
     );
     Node::arm_election(&mut effects);
-    if node.skip_vote_persist {
+    if node.is_mutant(Mutant::SkipVotePersist) {
         effects.extend(on_vote_fsync_ok(
             node,
             VoteWork::Campaign,
@@ -41,6 +46,11 @@ pub(crate) fn on_election_timeout(node: &mut Node) -> Vec<Effect> {
     effects
 }
 
+/// Handles the completion of an `fsync` operation for a vote or campaign action.
+///
+/// If the sync corresponds to a campaign (and we are still candidates in the same term),
+/// this sends out `RequestVote` RPCs to peers and attempts to become leader.
+/// If it corresponds to a vote reply, the granted/denied reply is sent back to the candidate.
 pub(crate) fn on_vote_fsync_ok(node: &mut Node, work: VoteWork, cookie_term: Term) -> Vec<Effect> {
     match work {
         VoteWork::Campaign => {
@@ -81,6 +91,11 @@ pub(crate) fn on_vote_fsync_ok(node: &mut Node, work: VoteWork, cookie_term: Ter
     }
 }
 
+/// Handles an incoming `RequestVote` message from another node.
+///
+/// Compares terms and log freshness. Steps down if the term is higher. Grants the vote
+/// if it hasn't already voted in this term and the candidate's log is at least as up-to-date.
+/// Persists its vote to disk before replying to the candidate (unless skipped).
 pub(crate) fn on_request_vote(node: &mut Node, from: NodeId, msg: Message) -> Vec<Effect> {
     let Message::RequestVote {
         term,
@@ -126,7 +141,7 @@ pub(crate) fn on_request_vote(node: &mut Node, from: NodeId, msg: Message) -> Ve
             &mut effects,
         );
         Node::arm_election(&mut effects);
-        if node.skip_vote_persist {
+        if node.is_mutant(Mutant::SkipVotePersist) {
             effects.extend(on_vote_fsync_ok(
                 node,
                 VoteWork::Reply {
@@ -163,6 +178,11 @@ pub(crate) fn on_request_vote(node: &mut Node, from: NodeId, msg: Message) -> Ve
     effects
 }
 
+/// Handles a `RequestVoteResp` (vote reply) from another node.
+///
+/// If the reply contains a higher term, the candidate steps down. If the vote was granted
+/// and the candidate is still in the same term, the vote is counted. If it reaches a majority,
+/// it transitions to the Leader role.
 pub(crate) fn on_request_vote_resp(node: &mut Node, from: NodeId, msg: Message) -> Vec<Effect> {
     let Message::RequestVoteResp { term, granted } = msg else {
         return Vec::new();
@@ -191,6 +211,10 @@ pub(crate) fn on_request_vote_resp(node: &mut Node, from: NodeId, msg: Message) 
     effects
 }
 
+/// Checks whether a Candidate has received a majority of votes, and transitions to Leader if so.
+///
+/// Also initializes leader state (like `next_index` and `match_index`), cancels the election timer,
+/// starts the heartbeat timer, appends a NoOp entry to the log, and initiates replication.
 fn maybe_become_leader(node: &mut Node) -> Vec<Effect> {
     if node.role != Role::Candidate || !node.is_majority(node.votes.len()) {
         return Vec::new();
@@ -207,26 +231,29 @@ fn maybe_become_leader(node: &mut Node) -> Vec<Effect> {
     }
     let mut effects = Vec::new();
     Node::cancel_election(&mut effects);
-    node.log.append(LogEntry {
-        term: node.current_term,
-        payload: LogPayload::NoOp,
-    });
-    let from = node.log.last_index();
-    node.persist(
-        PersistSpec {
-            meta: false,
-            truncate_to: None,
-            log_from: Some(from),
-            fsync: IoKind::LogFsync { ack: None },
-        },
-        &mut effects,
-    );
+    if !node.is_mutant(Mutant::NoLeaderNoop) {
+        node.log.append(LogEntry {
+            term: node.current_term,
+            payload: LogPayload::NoOp,
+        });
+        let from = node.log.last_index();
+        node.persist(
+            PersistSpec {
+                meta: false,
+                truncate_to: None,
+                log_from: Some(from),
+                fsync: IoKind::LogFsync { ack: None },
+            },
+            &mut effects,
+        );
+    }
     replication::replicate_all(node, &mut effects);
     Node::arm_heartbeat(&mut effects);
     effects
 }
 
 #[cfg(test)]
+#[cfg_attr(not(feature = "mutants"), allow(unused_imports))]
 mod tests {
     use super::*;
     use crate::effect::{Effect, IoOp};
@@ -234,12 +261,14 @@ mod tests {
     use crate::raft::state::{Role, TIMER_ELECTION, TIMER_HEARTBEAT};
     use crate::types::NodeId;
 
+    /// Helper function to create a solo cluster node (a cluster of 1).
     fn solo() -> Node {
         let mut node = Node::new(NodeId(0), Vec::new());
         node.step(Event::Recover { durable: vec![] });
         node
     }
 
+    /// Extracts the `IoId`s corresponding to `Fsync` operations from a list of effects.
     fn fsync_ids(effects: &[Effect]) -> Vec<crate::types::IoId> {
         effects
             .iter()
@@ -253,10 +282,12 @@ mod tests {
             .collect()
     }
 
+    /// Checks if a list of effects contains any `Send` operations.
     fn has_send(effects: &[Effect]) -> bool {
         effects.iter().any(|e| matches!(e, Effect::Send { .. }))
     }
 
+    /// Tests that the election timeout correctly schedules an `fsync` before sending out votes.
     #[test]
     fn election_timeout_does_not_send_before_fsync() {
         let mut node = solo();
@@ -274,6 +305,8 @@ mod tests {
         assert_eq!(node.role(), Role::Candidate);
     }
 
+    /// Tests that if `skip_vote_persist` is true, the node sends vote requests immediately.
+    #[cfg(feature = "mutants")]
     #[test]
     fn skip_vote_persist_sends_request_vote_in_persist_batch() {
         let mut node = Node::new(NodeId(0), vec![NodeId(1)]);
@@ -299,6 +332,7 @@ mod tests {
         )));
     }
 
+    /// Tests that a solo cluster transitions to leader immediately after its `fsync` completes.
     #[test]
     fn fsync_ok_then_solo_becomes_leader() {
         let mut node = solo();

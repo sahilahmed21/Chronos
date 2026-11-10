@@ -1,6 +1,8 @@
 //! P5 property checkers: planted votedFor skip, linearizability, liveness.
 //!
 //! Spec: `docs/roadmap/P05-properties.md`. Cluster heap only.
+//! Planted-bug tests need `--features mutants` (ADR-0002).
+#![cfg_attr(not(feature = "mutants"), allow(unused_imports))]
 
 use chronos_protocol::{
     ClientId, ClientReq, Cmd, Message, NodeId, RequestId, Role, Timestamp, TIMER_ELECTION,
@@ -56,6 +58,7 @@ fn assert_ok(cluster: &Cluster) {
 }
 
 /// Predict: sending RequestVote before Meta fsync fails persist-before-send.
+#[cfg(feature = "mutants")]
 #[test]
 fn planted_skip_vote_persist_fails_persist_before_send() {
     let mut cluster = Cluster::new(3, raft_cfg());
@@ -82,6 +85,7 @@ fn unplanted_solo_campaign_passes_persist_before_send() {
 
 /// Predict: crash before vote persist, recover, vote for another candidate in
 /// the same term → two leaders of that term.
+#[cfg(feature = "mutants")]
 #[test]
 fn planted_skip_vote_persist_fails_election_safety() {
     let mut cluster = Cluster::new(

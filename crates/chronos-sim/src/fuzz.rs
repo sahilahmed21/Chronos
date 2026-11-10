@@ -6,7 +6,7 @@
 use std::collections::BTreeMap;
 
 use chronos_protocol::codec::{put_u32_le, put_u64_le};
-use chronos_protocol::{ClientId, ClientReq, Cmd, NodeId, RequestId, Timestamp};
+use chronos_protocol::{ClientId, ClientReq, Cmd, Mutant, NodeId, RequestId, Timestamp};
 
 use crate::check::{CheckFail, CheckName};
 use crate::cluster::{Cluster, SimConfig};
@@ -35,6 +35,7 @@ pub struct FaultConfig {
 }
 
 impl Default for FaultConfig {
+    /// Provides default fault knobs configured for P3-safe testing (no faults injected).
     fn default() -> Self {
         Self {
             drop_ppm: 0,
@@ -56,6 +57,7 @@ pub enum Profile {
 }
 
 impl Profile {
+    /// Returns the string representation of the selected fuzz profile.
     pub fn as_str(self) -> &'static str {
         match self {
             Profile::Calm => "calm",
@@ -144,6 +146,7 @@ pub fn coverage_flags(c: &Coverage) -> Vec<&'static str> {
     flags
 }
 
+/// Aggregates multiple run coverage reports into a single summary.
 pub fn aggregate_coverage<'a, I>(reports: I) -> CoverageSummary
 where
     I: IntoIterator<Item = &'a Coverage>,
@@ -173,6 +176,7 @@ where
     summary
 }
 
+/// Formats an aggregated coverage summary into a human-readable text table.
 pub fn format_coverage_table(summary: &CoverageSummary) -> String {
     let mut s = format!(
         "# coverage runs={}\n# claim: profile=run knobs; observed=faults that fired; not all combinations\n",
@@ -240,6 +244,7 @@ pub enum ReplayVerdict {
 }
 
 impl ReplayVerdict {
+    /// Maps a replay verdict to a corresponding standard process exit code.
     pub fn exit_code(self) -> u8 {
         match self {
             Self::Clean | Self::DidNotReproduce => 0,
@@ -252,6 +257,7 @@ impl ReplayVerdict {
     }
 }
 
+/// Serializes a `SimConfig` into a compact byte format for reproducible crash headers.
 pub fn encode_config(cfg: &SimConfig) -> Vec<u8> {
     let mut buf = Vec::new();
     buf.push(cfg.n);
@@ -279,6 +285,7 @@ pub fn encode_config(cfg: &SimConfig) -> Vec<u8> {
     buf
 }
 
+/// Generates a randomized fuzzing plan (configuration and events) from a given seed.
 pub fn swarm_plan(seed: u64) -> SwarmPlan {
     let mut rng = Rng::new(seed);
     let profile = if rng.bool(500_000) {
@@ -336,6 +343,7 @@ pub fn swarm_plan(seed: u64) -> SwarmPlan {
     }
 }
 
+/// Generates and executes a full simulated fuzz run derived directly from a single random seed.
 pub fn run_seed(seed: u64) -> RunReport {
     let plan = swarm_plan(seed);
     run_plan(seed, plan.profile, plan.cfg, plan.extras)
@@ -353,15 +361,38 @@ pub fn run_plan(
     finish_report(seed, profile, cfg, extras, &cluster)
 }
 
+/// Same as `run_seed` with `mutant` active on every node (ADR-0002). Needs the
+/// `mutants` feature; panics otherwise.
+pub fn run_seed_mutant(seed: u64, mutant: Mutant) -> RunReport {
+    let plan = swarm_plan(seed);
+    let cluster = drain_plan_with(seed, &plan.cfg, &plan.extras, &[], Some(mutant));
+    finish_report(seed, plan.profile, plan.cfg, plan.extras, &cluster)
+}
+
 pub(crate) fn drain_plan(
     seed: u64,
     cfg: &SimConfig,
     extras: &[(Timestamp, WorldEvent)],
     skip_vote_persist: &[(NodeId, bool)],
 ) -> Cluster {
+    drain_plan_with(seed, cfg, extras, skip_vote_persist, None)
+}
+
+fn drain_plan_with(
+    seed: u64,
+    cfg: &SimConfig,
+    extras: &[(Timestamp, WorldEvent)],
+    skip_vote_persist: &[(NodeId, bool)],
+    all_nodes: Option<Mutant>,
+) -> Cluster {
     let mut cluster = Cluster::new(seed, cfg.clone());
     for (id, yes) in skip_vote_persist {
         cluster.set_skip_vote_persist(*id, *yes);
+    }
+    if let Some(m) = all_nodes {
+        for i in 0..cfg.n {
+            cluster.set_mutant(NodeId(i), Some(m));
+        }
     }
     for i in 0..cfg.n {
         cluster.inject_recover(NodeId(i));
@@ -420,6 +451,7 @@ pub(crate) fn finish_report(
     }
 }
 
+/// Serializes a full run report (including trace) into a crash file format for offline replay.
 pub fn format_fail_file(report: &RunReport) -> Vec<u8> {
     let check = check_label(report);
     let detail = report
@@ -442,10 +474,12 @@ pub fn format_fail_file(report: &RunReport) -> Vec<u8> {
     out
 }
 
+/// Extracts just the random seed from a formatted crash failure file payload.
 pub fn seed_from_fail_file(bytes: &[u8]) -> Option<u64> {
     fail_file_header(bytes).map(|h| h.seed)
 }
 
+/// Parses the header of a crash fail file, returning its deserialized metadata.
 pub fn fail_file_header(bytes: &[u8]) -> Option<FailFileHeader> {
     let header = fail_header_text(bytes)?;
     let mut seed = None;
@@ -485,6 +519,7 @@ pub fn fail_file_header(bytes: &[u8]) -> Option<FailFileHeader> {
     })
 }
 
+/// Validates that a replayed simulation exactly matches the trace recorded in the original failure file.
 pub fn verify_replay(header: &FailFileHeader, report: &RunReport) -> ReplayVerdict {
     if report.check.is_none() {
         return if header.check.is_none() {
@@ -508,6 +543,7 @@ pub fn verify_replay(header: &FailFileHeader, report: &RunReport) -> ReplayVerdi
     ReplayVerdict::Reproduced
 }
 
+/// Formats a single line text summary of a replay verdict.
 pub fn format_replay_line(
     verdict: ReplayVerdict,
     header: &FailFileHeader,
@@ -540,6 +576,7 @@ pub fn format_replay_line(
     }
 }
 
+/// Formats a sequence of planned `WorldEvent`s into a readable text list.
 pub fn format_planned_schedule(extras: &[(Timestamp, WorldEvent)]) -> String {
     let mut s = String::new();
     for (t, ev) in extras {
@@ -548,14 +585,17 @@ pub fn format_planned_schedule(extras: &[(Timestamp, WorldEvent)]) -> String {
     s
 }
 
+/// Extracts and formats the check failure label from a run report.
 fn check_label(report: &RunReport) -> String {
     check_label_of(report.check.as_ref().map(|f| f.check))
 }
 
+/// Formats a `CheckName` as its string label.
 fn check_label_of(check: Option<CheckName>) -> String {
     check.map(CheckName::as_label).unwrap_or("none").to_string()
 }
 
+/// Extracts just the header text section from raw fail file bytes.
 fn fail_header_text(bytes: &[u8]) -> Option<String> {
     let mut i = 0;
     while i < bytes.len() {
@@ -575,11 +615,13 @@ fn fail_header_text(bytes: &[u8]) -> Option<String> {
     None
 }
 
+/// Parses a hex string into a fixed 32-byte digest array.
 fn parse_digest_hex(s: &str) -> Option<[u8; 32]> {
     let bytes = parse_hex(s)?;
     bytes.try_into().ok()
 }
 
+/// Decodes an arbitrary hex string into bytes.
 fn parse_hex(s: &str) -> Option<Vec<u8>> {
     if !s.len().is_multiple_of(2) {
         return None;
@@ -592,6 +634,7 @@ fn parse_hex(s: &str) -> Option<Vec<u8>> {
     Some(out)
 }
 
+/// Stochastically plans the extra injected faults (crashes, partitions, clients) for a fuzz run.
 fn plan_extras(rng: &mut Rng, profile: Profile, cfg: &SimConfig) -> Vec<(Timestamp, WorldEvent)> {
     let mut extras = Vec::new();
     let mut downs: Vec<(NodeId, u64, u64)> = Vec::new();
@@ -748,10 +791,12 @@ fn plan_extras(rng: &mut Rng, profile: Profile, cfg: &SimConfig) -> Vec<(Timesta
     extras
 }
 
+/// Picks a random timestamp between 1 and `max_ns`.
 fn pick_time(rng: &mut Rng, max_ns: u64) -> Option<Timestamp> {
     pick_time_from(rng, 1, max_ns)
 }
 
+/// Picks a random timestamp inside the given half-open window `[min_ns, max_ns)`.
 fn pick_time_from(rng: &mut Rng, min_ns: u64, max_ns: u64) -> Option<Timestamp> {
     let hi = max_ns.saturating_sub(1);
     if min_ns > hi {
@@ -760,6 +805,7 @@ fn pick_time_from(rng: &mut Rng, min_ns: u64, max_ns: u64) -> Option<Timestamp> 
     Some(Timestamp(rng.delay_ns(min_ns, hi)))
 }
 
+/// Selects a random index in the range `[0, n)`.
 fn pick_idx(rng: &mut Rng, n: usize) -> usize {
     if n == 0 {
         return 0;
@@ -767,10 +813,12 @@ fn pick_idx(rng: &mut Rng, n: usize) -> usize {
     rng.delay_ns(0, (n as u64).saturating_sub(1)) as usize
 }
 
+/// Verifies that all timestamps in the extra event list fall within the expected `max_ns` boundary.
 fn timestamps_within(extras: &[(Timestamp, WorldEvent)], max_ns: u64) -> bool {
     extras.iter().all(|(t, _)| t.0 <= max_ns)
 }
 
+/// Validates that planned crash/recover windows for any individual node never overlap.
 fn crash_windows_disjoint(extras: &[(Timestamp, WorldEvent)]) -> bool {
     let mut crashes = Vec::new();
     let mut recovers = Vec::new();
@@ -817,18 +865,21 @@ fn crash_windows_disjoint(extras: &[(Timestamp, WorldEvent)]) -> bool {
     true
 }
 
+/// Checks if a node is currently down (crashed) at the given timestamp.
 fn is_down(downs: &[(NodeId, u64, u64)], id: NodeId, at: Timestamp) -> bool {
     downs
         .iter()
         .any(|(n, from, until)| *n == id && at.0 >= *from && at.0 < *until)
 }
 
+/// Checks if a node has any scheduled downtime within the specified time window.
 fn window_busy(downs: &[(NodeId, u64, u64)], id: NodeId, from: u64, until: u64) -> bool {
     downs
         .iter()
         .any(|(n, a, b)| *n == id && from < *b && *a < until)
 }
 
+/// Picks a random node that is currently alive at the given timestamp.
 fn pick_live(rng: &mut Rng, n: u8, downs: &[(NodeId, u64, u64)], at: Timestamp) -> Option<NodeId> {
     let live: Vec<NodeId> = (0..n)
         .map(NodeId)
@@ -840,6 +891,7 @@ fn pick_live(rng: &mut Rng, n: u8, downs: &[(NodeId, u64, u64)], at: Timestamp) 
     Some(live[pick_idx(rng, live.len())])
 }
 
+/// Picks a random node that is completely free of crashes during the specified time window.
 fn pick_free_window(
     rng: &mut Rng,
     n: u8,
@@ -857,6 +909,7 @@ fn pick_free_window(
     Some(free[pick_idx(rng, free.len())])
 }
 
+/// Encodes the sequence of planned extra events into a compact byte array.
 fn encode_extras(extras: &[(Timestamp, WorldEvent)]) -> Vec<u8> {
     let mut body = Vec::new();
     let mut n = 0u32;
@@ -874,6 +927,7 @@ fn encode_extras(extras: &[(Timestamp, WorldEvent)]) -> Vec<u8> {
     buf
 }
 
+/// Encodes a single `WorldEvent` into a byte buffer, returning true if successful.
 fn encode_extra(buf: &mut Vec<u8>, ev: &WorldEvent) -> bool {
     match ev {
         WorldEvent::Crash { node, torn_extra } => {
@@ -930,6 +984,7 @@ fn encode_extra(buf: &mut Vec<u8>, ev: &WorldEvent) -> bool {
     }
 }
 
+/// Encodes a byte array into a lowercase hex string.
 fn hex_encode(bytes: &[u8]) -> String {
     let mut s = String::with_capacity(bytes.len().saturating_mul(2));
     for b in bytes {

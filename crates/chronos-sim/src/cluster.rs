@@ -6,8 +6,8 @@
 use std::collections::{BTreeMap, VecDeque};
 
 use chronos_protocol::{
-    ClientId, ClientReq, ClientResp, Cmd, Effect, Event, IoError, IoId, IoOp, Message, MsgId, Node,
-    NodeId, RequestId, Role, Term, TimerId, TimerKind, Timestamp,
+    ClientId, ClientReq, ClientResp, Cmd, Effect, Event, IoError, IoId, IoOp, Message, MsgId,
+    Mutant, Node, NodeId, RequestId, Role, Term, TimerId, TimerKind, Timestamp,
 };
 
 use crate::check::{majority_fully_connected, CheckFail, CheckView, Checker, NodeSnap};
@@ -19,8 +19,10 @@ use crate::rng::Rng;
 use crate::scheduler::{DropReason, Scheduler, WorldEvent};
 use crate::trace::Trace;
 
-/// Run `event` and every delay-0 completion until the disk queue is idle.
-/// Replies are collected in the order `step` emitted them.
+/// Runs the given event and all resulting delay-0 completions until the disk queue is idle.
+///
+/// Dispatches the initial event to the node and loops to process all submitted I/O operations
+/// synchronously. Collects and returns any client replies emitted during this process.
 pub fn drive(node: &mut Node, disk: &mut SimDisk, event: Event) -> Vec<(ClientId, ClientResp)> {
     let mut replies = Vec::new();
     let mut q = VecDeque::new();
@@ -67,6 +69,7 @@ pub struct SimConfig {
 }
 
 impl Default for SimConfig {
+    /// Provides a default simulation configuration.
     fn default() -> Self {
         Self {
             n: 3,
@@ -96,6 +99,7 @@ impl Default for SimConfig {
 }
 
 impl SimConfig {
+    /// Extracts the subset of configuration that pertains to injected faults.
     pub fn faults(&self) -> FaultConfig {
         FaultConfig {
             drop_ppm: self.drop_ppm,
@@ -167,11 +171,13 @@ pub struct ObservedSchedule {
     pub book: ReplayBook,
 }
 
+/// Computes a deterministic SHA-256 hash for a given message's encoded representation.
 fn message_hash(msg: &Message) -> [u8; 32] {
     let bytes = msg.encode().unwrap_or_else(|| vec![255]);
     crate::trace::sha256(&bytes)
 }
 
+/// Generates a `SendKey` identity from a message and its source/destination.
 fn send_key(from: NodeId, to: NodeId, msg: &Message) -> SendKey {
     SendKey {
         from,
@@ -180,6 +186,7 @@ fn send_key(from: NodeId, to: NodeId, msg: &Message) -> SendKey {
     }
 }
 
+/// Generates a `DeliveryToken` identifying a specific message instance for drop/dup matching.
 fn delivery_token(from: NodeId, to: NodeId, msg: &Message) -> DeliveryToken {
     DeliveryToken {
         from,
@@ -188,10 +195,12 @@ fn delivery_token(from: NodeId, to: NodeId, msg: &Message) -> DeliveryToken {
     }
 }
 
+/// Helper to push a delay value onto a specific FIFO queue in a map.
 fn queue_push<K: Ord>(map: &mut BTreeMap<K, VecDeque<u64>>, key: K, delay: u64) {
     map.entry(key).or_default().push_back(delay);
 }
 
+/// Helper to pop the next delay value from a specific FIFO queue, removing empty queues.
 fn queue_pop<K: Copy + Ord>(map: &mut BTreeMap<K, VecDeque<u64>>, key: K) -> Option<u64> {
     let delay = map.get_mut(&key)?.pop_front();
     if map.get(&key).is_some_and(|q| q.is_empty()) {
@@ -200,6 +209,7 @@ fn queue_pop<K: Copy + Ord>(map: &mut BTreeMap<K, VecDeque<u64>>, key: K) -> Opt
     delay
 }
 
+/// Removes a specific delivery token from a list, returning true if it was found and removed.
 fn take_token(tokens: &mut Vec<DeliveryToken>, token: DeliveryToken) -> bool {
     if let Some(i) = tokens
         .iter()
@@ -234,7 +244,7 @@ pub struct Cluster {
     checker: Checker,
     history: History,
     check_fail: Option<CheckFail>,
-    skip_vote_persist: Vec<bool>,
+    mutants: Vec<Option<Mutant>>,
     last_fault_at: Timestamp,
     event_seq: u64,
     dup_sends: u64,
@@ -244,6 +254,7 @@ pub struct Cluster {
 }
 
 impl Cluster {
+    /// Creates a new simulation cluster with the specified random seed and configuration.
     pub fn new(seed: u64, cfg: SimConfig) -> Self {
         let n = usize::from(cfg.n);
         let mut cluster = Self {
@@ -267,7 +278,7 @@ impl Cluster {
             checker: Checker::new(),
             history: History::new(),
             check_fail: None,
-            skip_vote_persist: vec![false; n],
+            mutants: vec![None; n],
             last_fault_at: Timestamp(0),
             event_seq: 0,
             dup_sends: 0,
@@ -285,34 +296,42 @@ impl Cluster {
         cluster
     }
 
+    /// Retrieves a reference to the `Node` corresponding to the given ID, if valid.
     pub fn node(&self, id: NodeId) -> Option<&Node> {
         self.idx(id).map(|i| &self.nodes[i])
     }
 
+    /// Returns the configured number of nodes in the cluster.
     pub fn node_count(&self) -> u8 {
         self.cfg.n
     }
 
+    /// Returns a list of all successfully delivered messages recorded so far.
     pub fn delivered(&self) -> &[(NodeId, NodeId, MsgId)] {
         &self.delivered
     }
 
+    /// Returns a list of all messages sent by any node, regardless of delivery status.
     pub fn messages(&self) -> &[(NodeId, NodeId, Message)] {
         &self.messages
     }
 
+    /// Returns a list of all messages dropped during the simulation run.
     pub fn dropped(&self) -> &[(NodeId, NodeId, MsgId, DropReason)] {
         &self.dropped
     }
 
+    /// Returns the total number of duplicate message sends that have occurred.
     pub fn dup_sends(&self) -> u64 {
         self.dup_sends
     }
 
+    /// Returns whether any node applied a torn suffix during recovery.
     pub fn torn_applied(&self) -> bool {
         self.torn_applied
     }
 
+    /// Returns the recorded schedule choices (delays, drops, etc.) observed during execution.
     pub fn observed(&self) -> &ObservedSchedule {
         &self.observed
     }
@@ -334,46 +353,61 @@ impl Cluster {
         };
     }
 
+    /// Returns the log of role transitions recorded for each node.
     pub fn role_log(&self) -> &[(Timestamp, NodeId, Role, Term)] {
         &self.role_log
     }
 
+    /// Returns the current simulated time.
     pub fn now(&self) -> Timestamp {
         self.sched.now()
     }
 
+    /// Peeks at the timestamp of the next pending event in the schedule.
     pub fn peek_time(&self) -> Option<Timestamp> {
         self.sched.peek_time()
     }
 
+    /// Checks if the simulated network is connected between two nodes.
     pub fn connected(&self, from: NodeId, to: NodeId) -> bool {
         self.net.connected(from, to)
     }
 
+    /// Checks if a node is currently simulated as alive (not crashed).
     pub fn alive(&self, id: NodeId) -> bool {
         self.idx(id).is_some_and(|i| self.alive[i])
     }
 
+    /// Adds a dynamic message drop rule to the simulated network.
     pub fn add_drop_rule(&mut self, rule: DropRule) {
         self.drop_rules.push(rule);
     }
 
+    /// Checks whether election safety properties hold globally.
     pub fn election_safety_ok(&self) -> bool {
         self.checker.election_safety_ok()
     }
 
+    /// Returns any check failure that was recorded during the simulation run.
     pub fn check_fail(&self) -> Option<&CheckFail> {
         self.check_fail.as_ref()
     }
 
+    /// Configures a node to skip waiting for vote persistence.
     pub fn set_skip_vote_persist(&mut self, node: NodeId, yes: bool) {
+        self.set_mutant(node, yes.then_some(Mutant::SkipVotePersist));
+    }
+
+    /// Selects a deliberate protocol bug for one node (needs the `mutants` feature for `Some`).
+    pub fn set_mutant(&mut self, node: NodeId, mutant: Option<Mutant>) {
         let Some(i) = self.idx(node) else {
             return;
         };
-        self.skip_vote_persist[i] = yes;
-        self.nodes[i].set_skip_vote_persist(yes);
+        self.mutants[i] = mutant;
+        self.nodes[i].set_mutant(mutant);
     }
 
+    /// Returns the log of all applied I/O operations and their outcomes.
     pub fn applied_io(&self) -> &[(NodeId, IoId, Result<(), IoError>)] {
         &self.applied_io
     }
@@ -396,10 +430,12 @@ impl Cluster {
         self.check_fail.is_none()
     }
 
+    /// Directly injects a `WorldEvent` into the schedule at a specific time.
     pub fn inject_at(&mut self, time: Timestamp, event: WorldEvent) {
         self.sched.enqueue(time, event);
     }
 
+    /// Enqueues a simulated failure for the next fsync operation on a given node.
     pub fn fail_next_fsync(&mut self, node: NodeId) {
         if self.idx(node).is_some() {
             self.sched
@@ -407,30 +443,37 @@ impl Cluster {
         }
     }
 
+    /// Returns a slice of the simulated disk bytes for a given node.
     pub fn disk_bytes(&self, node: NodeId) -> Option<&[u8]> {
         self.idx(node).map(|i| self.disks[i].bytes.as_slice())
     }
 
+    /// Returns the client replies gathered during the simulation.
     pub fn replies(&self) -> &[(ClientId, ClientResp)] {
         &self.replies
     }
 
+    /// Returns the history of timers that have fired.
     pub fn timers_stepped(&self) -> &[(NodeId, TimerId)] {
         &self.timers_stepped
     }
 
+    /// Returns a SHA-256 digest of the execution trace.
     pub fn digest(&self) -> [u8; 32] {
         self.trace.digest()
     }
 
+    /// Returns the complete concatenated execution trace.
     pub fn encoded_trace(&self) -> Vec<u8> {
         self.trace.concat()
     }
 
+    /// Returns the simulated durable length of the given node's disk.
     pub fn durable_len(&self, node: NodeId) -> Option<usize> {
         self.idx(node).map(|i| self.disks[i].durable_len)
     }
 
+    /// Injects a recovery event for the specified node into the schedule.
     pub fn inject_recover(&mut self, node: NodeId) {
         if self.idx(node).is_none() {
             return;
@@ -439,6 +482,7 @@ impl Cluster {
             .enqueue(self.sched.now(), WorldEvent::Recover { node });
     }
 
+    /// Injects a client request event for the specified node into the schedule.
     pub fn inject_client(&mut self, node: NodeId, req: ClientReq) {
         if self.idx(node).is_none() {
             return;
@@ -447,6 +491,7 @@ impl Cluster {
             .enqueue(self.sched.now(), WorldEvent::ClientInject { node, req });
     }
 
+    /// Observers and dispatches a directly injected message send between nodes.
     pub fn inject_send(&mut self, from: NodeId, to: NodeId, msg: Message) {
         if self.idx(from).is_none() || self.idx(to).is_none() {
             return;
@@ -455,6 +500,7 @@ impl Cluster {
         self.dispatch_send(from, to, msg);
     }
 
+    /// Injects a raw timer expiration event directly without waiting for a delay.
     pub fn inject_timer(&mut self, node: NodeId, timer: TimerId) {
         if self.idx(node).is_none() {
             return;
@@ -471,6 +517,7 @@ impl Cluster {
         );
     }
 
+    /// Injects a crash event for a specific node into the schedule.
     pub fn inject_crash(&mut self, node: NodeId) {
         if self.idx(node).is_none() {
             return;
@@ -484,10 +531,12 @@ impl Cluster {
         );
     }
 
+    /// Injects a network partition (or connection) between two nodes symmetrically.
     pub fn inject_partition(&mut self, from: NodeId, to: NodeId, connected: bool) {
         self.inject_partition_ex(from, to, connected, false);
     }
 
+    /// Injects a network partition with optional asymmetric connection properties.
     pub fn inject_partition_ex(
         &mut self,
         from: NodeId,
@@ -509,6 +558,7 @@ impl Cluster {
         );
     }
 
+    /// Directly arms a new timer for the given node.
     pub fn inject_arm_timer(&mut self, node: NodeId, timer: TimerId, kind: TimerKind) {
         if self.idx(node).is_none() {
             return;
@@ -516,6 +566,7 @@ impl Cluster {
         self.arm_timer(node, timer, kind);
     }
 
+    /// Directly cancels an existing timer for the given node by bumping its generation.
     pub fn inject_cancel_timer(&mut self, node: NodeId, timer: TimerId) {
         if self.idx(node).is_none() {
             return;
@@ -523,6 +574,7 @@ impl Cluster {
         self.bump_timer(node, timer);
     }
 
+    /// Drains the schedule until idle or until a live leader is found and no non-timer events remain.
     pub fn drain(&mut self) {
         loop {
             if self.has_live_leader() && !self.sched.has_non_timer() {
@@ -542,6 +594,7 @@ impl Cluster {
         self.finish_checks();
     }
 
+    /// Checks if any node in the cluster is currently an alive Leader.
     fn has_live_leader(&self) -> bool {
         self.nodes
             .iter()
@@ -549,10 +602,12 @@ impl Cluster {
             .any(|(i, n)| self.alive.get(i).copied().unwrap_or(false) && n.role() == Role::Leader)
     }
 
+    /// Indicates whether the drain policy is using a recorded schedule replay.
     fn on_schedule(&self) -> bool {
         matches!(self.policy, DrainPolicy::Schedule { .. })
     }
 
+    /// Retrieves the default election timeout delay based on buggify configuration.
     fn election_default(&self) -> u64 {
         if self.cfg.buggify_election_edge_max {
             self.cfg.election_max_ns
@@ -561,6 +616,7 @@ impl Cluster {
         }
     }
 
+    /// Computes a random jitter delay to add to timer expirations (unless replaying a schedule).
     fn jitter(&mut self) -> u64 {
         if self.on_schedule() {
             return 0;
@@ -572,6 +628,7 @@ impl Cluster {
         }
     }
 
+    /// Resolves a `NodeId` into its internal array index.
     fn idx(&self, id: NodeId) -> Option<usize> {
         let i = usize::from(id.0);
         if i < self.nodes.len() {
@@ -581,16 +638,19 @@ impl Cluster {
         }
     }
 
+    /// Increments the generation of a given timer for a node, invalidating previously scheduled events.
     fn bump_timer(&mut self, node: NodeId, timer: TimerId) -> u64 {
         let g = self.timer_gen.entry((node, timer)).or_insert(0);
         *g = g.saturating_add(1);
         *g
     }
 
+    /// Verifies whether the specified timer generation matches the current generation.
     fn timer_is_current(&self, node: NodeId, timer: TimerId, generation: u64) -> bool {
         self.timer_gen.get(&(node, timer)).copied().unwrap_or(0) == generation
     }
 
+    /// Arms a new timer of the given kind and enqueues its expiration event.
     fn arm_timer(&mut self, from: NodeId, id: TimerId, kind: TimerKind) {
         let generation = self.bump_timer(from, id);
         let now = self.sched.now();
@@ -610,6 +670,7 @@ impl Cluster {
         );
     }
 
+    /// Resolves the election timeout delay using the active policy (schedule or RNG).
     fn election_delay(&mut self, node: NodeId, life: u64) -> u64 {
         let key = (node.0, life);
         let fallback = self.election_default();
@@ -637,6 +698,7 @@ impl Cluster {
         }
     }
 
+    /// Resolves the heartbeat timeout delay using the active policy (schedule or RNG).
     fn heartbeat_delay(&mut self, node: NodeId, life: u64) -> u64 {
         let key = (node.0, life);
         let fallback = self.cfg.heartbeat_ns;
@@ -658,6 +720,7 @@ impl Cluster {
         }
     }
 
+    /// Resolves an I/O operation delay using the active policy (schedule or RNG).
     fn io_delay(&mut self, node: NodeId, op: &IoOp) -> u64 {
         let life = self.idx(node).map(|i| self.life[i]).unwrap_or(0);
         let tag = u8::from(matches!(op, IoOp::Fsync));
@@ -687,6 +750,7 @@ impl Cluster {
         }
     }
 
+    /// Bumps generations for all timers belonging to a node (typically on crash/recovery).
     fn bump_all_timers(&mut self, node: NodeId) {
         let timers: Vec<TimerId> = self
             .timer_gen
@@ -698,16 +762,19 @@ impl Cluster {
         }
     }
 
+    /// Re-initializes a node object in the internal nodes array (e.g., during recovery).
     fn reset_node(&mut self, i: usize, id: NodeId) {
         self.nodes[i] = make_node(id, self.cfg.n);
         self.nodes[i].set_reject_ok_ae(self.cfg.buggify_reject_ok_ae);
-        self.nodes[i].set_skip_vote_persist(self.skip_vote_persist[i]);
+        self.nodes[i].set_mutant(self.mutants[i]);
     }
 
+    /// Checks if a node is currently simulated as alive (internal helper).
     fn is_up(&self, node: NodeId) -> bool {
         self.idx(node).is_some_and(|i| self.alive[i])
     }
 
+    /// Records a role change for a given node if role logging is enabled.
     fn note_role(&mut self, node: NodeId) {
         if !self.cfg.record_roles {
             return;
@@ -721,6 +788,7 @@ impl Cluster {
         self.role_log.push((t, node, role, term));
     }
 
+    /// Sets the persistent `check_fail` error if a safety checker returns an `Err`.
     fn note_check(&mut self, r: Result<(), CheckFail>) {
         if self.check_fail.is_none() {
             if let Err(mut e) = r {
@@ -732,6 +800,7 @@ impl Cluster {
         }
     }
 
+    /// Captures a point-in-time snapshot of the state of all nodes.
     fn node_snapshots(&self) -> Vec<NodeSnap> {
         self.nodes
             .iter()
@@ -750,6 +819,7 @@ impl Cluster {
             .collect()
     }
 
+    /// Calls the checker's `observe_send` to ensure persist-before-send properties.
     fn observe_outgoing(&mut self, from: NodeId, to: NodeId, msg: &Message) {
         if !self.cfg.check_safety || !self.cfg.check_engineering {
             return;
@@ -762,6 +832,7 @@ impl Cluster {
         self.note_check(r);
     }
 
+    /// Runs synchronous Raft invariants (e.g. log matching, commit monotonic) via `Checker`.
     fn run_checks(&mut self) {
         if !self.cfg.check_safety || self.check_fail.is_some() {
             return;
@@ -780,6 +851,7 @@ impl Cluster {
         self.note_check(result);
     }
 
+    /// Evaluates linearizability and liveness invariants after a simulation drain is complete.
     fn finish_checks(&mut self) {
         if self.cfg.check_safety && self.check_fail.is_none() {
             let r = self.history.linearizable();
@@ -808,6 +880,7 @@ impl Cluster {
         }
     }
 
+    /// Enqueues a message delivery event in the schedule at the calculated delivery time.
     fn enqueue_delivery(&mut self, d: Delivery) {
         let at = Timestamp(d.delivery_at.0.saturating_add(self.jitter()));
         self.sched.enqueue(
@@ -821,6 +894,7 @@ impl Cluster {
         );
     }
 
+    /// Records a dropped message and enqueues a ghost event for tracing purposes.
     fn record_drop(&mut self, from: NodeId, to: NodeId, msg_id: MsgId, reason: DropReason) {
         self.dropped.push((from, to, msg_id, reason));
         self.sched.enqueue(
@@ -834,6 +908,7 @@ impl Cluster {
         );
     }
 
+    /// Claims a pre-recorded drop event from a replay schedule, if applicable.
     fn take_schedule_drop(&mut self, token: DeliveryToken) -> bool {
         match &mut self.policy {
             DrainPolicy::Schedule { drops, .. } => take_token(drops, token),
@@ -841,6 +916,7 @@ impl Cluster {
         }
     }
 
+    /// Claims a pre-recorded duplicate event from a replay schedule, if applicable.
     fn take_schedule_dup(&mut self, token: DeliveryToken) -> bool {
         match &mut self.policy {
             DrainPolicy::Schedule { dups, .. } => take_token(dups, token),
@@ -848,6 +924,7 @@ impl Cluster {
         }
     }
 
+    /// Retrieves the next recorded network delay for a specific message type.
     fn pop_send_delay(&mut self, key: SendKey, bind: bool, fallback: u64) -> u64 {
         if !bind {
             return fallback;
@@ -860,6 +937,7 @@ impl Cluster {
         }
     }
 
+    /// Dispatches an outgoing message to the network subsystem using either schedule or swarm rules.
     fn dispatch_send(&mut self, from: NodeId, to: NodeId, msg: Message) {
         if self.on_schedule() {
             self.dispatch_send_schedule(from, to, msg);
@@ -868,6 +946,7 @@ impl Cluster {
         }
     }
 
+    /// Dispatches a message according to a fixed replay schedule.
     fn dispatch_send_schedule(&mut self, from: NodeId, to: NodeId, msg: Message) {
         let now = self.sched.now();
         let key = send_key(from, to, &msg);
@@ -916,6 +995,7 @@ impl Cluster {
         }
     }
 
+    /// Dispatches a message randomly simulating network delays, drops, and duplicates (swarm mode).
     fn dispatch_send_swarm(&mut self, from: NodeId, to: NodeId, msg: Message) {
         let now = self.sched.now();
         let key = send_key(from, to, &msg);
@@ -995,6 +1075,7 @@ impl Cluster {
         }
     }
 
+    /// Determines how many trailing un-fsynced bytes to discard upon a simulated crash.
     fn resolve_torn_extra(&mut self, node: NodeId, specified: Option<u64>) -> u64 {
         let extra = if let Some(extra) = specified {
             extra
@@ -1023,6 +1104,7 @@ impl Cluster {
         extra
     }
 
+    /// Evaluates whether an enqueued event applies to an obsolete node incarnation and should be ignored.
     fn is_ghost(&self, event: &WorldEvent) -> bool {
         match event {
             WorldEvent::TimerFired {
@@ -1043,12 +1125,14 @@ impl Cluster {
         }
     }
 
+    /// Cleans up resources (e.g. network queues) for an event that was deemed a ghost.
     fn dismiss_ghost(&mut self, event: &WorldEvent) {
         if let WorldEvent::MessageDeliver { msg_id, .. } = event {
             self.net.take(*msg_id);
         }
     }
 
+    /// Processes a single `WorldEvent`, updating global state and optionally stepping the target node.
     fn apply_world(&mut self, time: Timestamp, seq: u64, event: WorldEvent) {
         if self.is_ghost(&event) {
             self.dismiss_ghost(&event);
@@ -1141,6 +1225,7 @@ impl Cluster {
         self.run_checks();
     }
 
+    /// Forwards an `Event` to a specific node's state machine, interpreting the resulting `Effect`s.
     fn step_node(&mut self, node: NodeId, event: Event) {
         let Some(i) = self.idx(node) else {
             return;
@@ -1150,6 +1235,7 @@ impl Cluster {
         self.note_role(node);
     }
 
+    /// Evaluates and enqueues the `Effect`s produced by a node in response to an event.
     fn interpret(&mut self, from: NodeId, effects: Vec<Effect>) {
         let now = self.sched.now();
         for effect in effects {
@@ -1194,11 +1280,13 @@ impl Cluster {
     }
 }
 
+/// Helper to instantiate a new `Node` with the appropriate peer set based on cluster size.
 fn make_node(id: NodeId, n: u8) -> Node {
     let peers = (0..n).map(NodeId).filter(|&p| p != id).collect();
     Node::new(id, peers)
 }
 
+/// Executes a default simulated scenario on a cluster to generate a trace digest.
 pub fn run(seed: u64, cfg: SimConfig) -> [u8; 32] {
     let n = cfg.n;
     let mut cluster = Cluster::new(seed, cfg);

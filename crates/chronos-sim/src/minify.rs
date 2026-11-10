@@ -95,6 +95,7 @@ pub enum MinifyOutcome {
     Minified(MinResult),
 }
 
+/// Initiates the delta-debugging minimization process on a simulation generated from a given seed.
 pub fn minify(seed: u64) -> MinifyOutcome {
     let plan = swarm_plan(seed);
     minify_input(MinifyInput {
@@ -105,6 +106,7 @@ pub fn minify(seed: u64) -> MinifyOutcome {
     })
 }
 
+/// Runs the minifier directly on a supplied configuration and schedule plan.
 pub fn minify_input(input: MinifyInput) -> MinifyOutcome {
     minify_job(MinifyJob {
         input,
@@ -113,6 +115,7 @@ pub fn minify_input(input: MinifyInput) -> MinifyOutcome {
 }
 
 #[cfg(test)]
+#[cfg_attr(not(feature = "mutants"), allow(dead_code))]
 fn minify_planted(input: MinifyInput, skip_vote_persist: Vec<(NodeId, bool)>) -> MinifyOutcome {
     minify_job(MinifyJob {
         input,
@@ -120,6 +123,7 @@ fn minify_planted(input: MinifyInput, skip_vote_persist: Vec<(NodeId, bool)>) ->
     })
 }
 
+/// Core minimization loop: executes the plan, identifies the failure, extracts atoms, and delta-debugs.
 fn minify_job(job: MinifyJob) -> MinifyOutcome {
     let cluster = drain_plan(
         job.input.seed,
@@ -162,6 +166,7 @@ fn minify_job(job: MinifyJob) -> MinifyOutcome {
     })
 }
 
+/// Formats the final minimized result struct into a human-readable summary string.
 pub fn format_min_schedule(result: &MinResult) -> String {
     let mut s = format!(
         "# seed {}\n# check {}\n# atoms {} -> {}\n# extras {} -> {}\n# rounds {}\n",
@@ -183,6 +188,7 @@ pub fn format_min_schedule(result: &MinResult) -> String {
     s
 }
 
+/// Converts a reduced list of `Atom`s back into timestamped `WorldEvent`s for replay.
 pub fn atoms_to_extras(atoms: &[Atom]) -> Vec<(Timestamp, WorldEvent)> {
     let mut stamped = Vec::new();
     for atom in atoms {
@@ -287,6 +293,7 @@ pub fn atoms_to_extras(atoms: &[Atom]) -> Vec<(Timestamp, WorldEvent)> {
         .collect()
 }
 
+/// Processes the original raw event list and observed swarm schedule into independent removal candidates (`Atom`s).
 pub(crate) fn atomize(
     extras: &[(Timestamp, WorldEvent)],
     observed: &ObservedSchedule,
@@ -424,6 +431,7 @@ pub(crate) fn atomize(
     atoms
 }
 
+/// Formats a single `Atom` into a log-friendly string representation.
 fn format_atom(atom: &Atom) -> String {
     match atom {
         Atom::CrashWindow {
@@ -501,6 +509,7 @@ fn format_atom(atom: &Atom) -> String {
     }
 }
 
+/// Standard delta debugging algorithm: attempts to find a minimal failing subset of atoms.
 fn delta_debug(
     job: &MinifyJob,
     atoms: Vec<Atom>,
@@ -512,6 +521,7 @@ fn delta_debug(
     })
 }
 
+/// Core delta debugging logic parameterizing the test oracle function and iteration budget.
 fn delta_debug_with<F>(
     mut atoms: Vec<Atom>,
     budget: u32,
@@ -562,6 +572,7 @@ where
     (atoms, false)
 }
 
+/// Wraps the test oracle to track the number of rounds against the allotted budget.
 fn propose<F>(budget: u32, rounds: &mut u32, atoms: &[Atom], fails: &mut F) -> bool
 where
     F: FnMut(&[Atom]) -> bool,
@@ -573,6 +584,7 @@ where
     fails(atoms)
 }
 
+/// Test oracle: runs a candidate schedule subset and checks if it reproduces the target check failure.
 fn schedule_fails(
     job: &MinifyJob,
     atoms: &[Atom],
@@ -584,6 +596,7 @@ fn schedule_fails(
     matches!(&report.check, Some(fail) if fail.check == target && !fail.check.is_abort())
 }
 
+/// Constructs a cluster, applies a candidate schedule, and returns the final run report.
 fn run_schedule(
     job: &MinifyJob,
     atoms: &[Atom],
@@ -661,6 +674,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(not(feature = "mutants"), allow(dead_code))]
     fn public_input(extras: Vec<(Timestamp, WorldEvent)>) -> MinifyInput {
         MinifyInput {
             seed: 3,
@@ -805,6 +819,7 @@ mod tests {
         assert_eq!(outcome, MinifyOutcome::Clean);
     }
 
+    #[cfg(feature = "mutants")]
     #[test]
     fn public_minify_never_plants_the_hook() {
         let outcome = minify_input(public_input(Vec::new()));
@@ -820,6 +835,7 @@ mod tests {
         assert_eq!(result.check, CheckName::PersistBeforeSend);
     }
 
+    #[cfg(feature = "mutants")]
     #[test]
     fn minify_strips_junk_extras_from_planted_persist_before_send() {
         let extras = vec![

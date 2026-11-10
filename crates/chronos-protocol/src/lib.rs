@@ -14,7 +14,7 @@ pub mod wal;
 pub use effect::{ClientError, ClientResp, Effect, IoOp, TimerKind};
 pub use event::{ClientReq, Event, IoError, Message};
 pub use raft::log::Log;
-pub use raft::state::{Node, PersistCookie, Role, TIMER_ELECTION, TIMER_HEARTBEAT};
+pub use raft::state::{Mutant, Node, PersistCookie, Role, TIMER_ELECTION, TIMER_HEARTBEAT};
 pub use raft::step::step;
 pub use types::{ClientId, Cmd, Index, IoId, MsgId, NodeId, RequestId, Term, TimerId, Timestamp};
 pub use wal::record::{

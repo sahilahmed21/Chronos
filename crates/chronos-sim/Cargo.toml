@@ -9,6 +9,9 @@ description = "Deterministic scheduler, sim net/disk, checkers, fuzzer."
 [dependencies]
 chronos-protocol = { path = "../chronos-protocol" }
 
+[features]
+mutants = ["chronos-protocol/mutants"]
+
 [lints]
 workspace = true
 

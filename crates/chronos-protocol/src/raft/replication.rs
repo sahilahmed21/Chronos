@@ -6,10 +6,13 @@
 use crate::effect::{ClientError, ClientResp, Effect};
 use crate::event::{ClientReq, Message};
 use crate::kv::machine::apply;
-use crate::raft::state::{AeAck, IoKind, Node, Pending, PersistSpec, Role, VoteWork};
-use crate::types::{Index, NodeId, Term};
+use crate::raft::state::{AeAck, IoKind, Mutant, Node, Pending, PersistSpec, Role, VoteWork};
+use crate::types::{Cmd, Index, NodeId, Term};
 use crate::wal::record::{encode_record, LogEntry, LogPayload, WalRecord};
 
+/// Sends an `AppendEntries` RPC to all peer nodes to replicate log entries.
+///
+/// This is typically called by a leader to push new entries or to send a heartbeat.
 pub(crate) fn replicate_all(node: &Node, effects: &mut Vec<Effect>) {
     for &peer in &node.peers {
         effects.push(Effect::Send {
@@ -19,6 +22,10 @@ pub(crate) fn replicate_all(node: &Node, effects: &mut Vec<Effect>) {
     }
 }
 
+/// Constructs an `AppendEntries` message tailored for a specific peer.
+///
+/// Looks up the peer's `next_index` to determine which log entries need to be sent,
+/// along with the appropriate `prev_index` and `prev_term` for consistency checks.
 fn append_entries_for(node: &Node, peer: NodeId) -> Message {
     let next = node.next_index.get(&peer).copied().unwrap_or(Index(1));
     let prev_index = Index(next.0.saturating_sub(1));
@@ -32,6 +39,10 @@ fn append_entries_for(node: &Node, peer: NodeId) -> Message {
     }
 }
 
+/// Handles the heartbeat timer firing.
+///
+/// If the node is a leader, it sends `AppendEntries` (empty or with data) to all peers
+/// and rearms the heartbeat timer.
 pub(crate) fn on_heartbeat(node: &mut Node) -> Vec<Effect> {
     if node.role != Role::Leader {
         return Vec::new();
@@ -42,6 +53,11 @@ pub(crate) fn on_heartbeat(node: &mut Node) -> Vec<Effect> {
     effects
 }
 
+/// Handles a successful `fsync` of the log.
+///
+/// Updates the node's durable state based on the provided cookie. If the node is a leader,
+/// it checks if it can commit any new entries and replies to clients. If the sync was
+/// for a follower's `AppendEntries` processing (indicated by `ack`), it sends the reply to the leader.
 pub(crate) fn on_log_fsync_ok(
     node: &mut Node,
     cookie: crate::raft::state::PersistCookie,
@@ -83,6 +99,10 @@ pub(crate) fn on_log_fsync_ok(
     effects
 }
 
+/// Handles an error during log `fsync`.
+///
+/// Iterates over pending client requests up to `last_index` and replies with an I/O error
+/// to inform clients that their requests could not be durably recorded.
 pub(crate) fn on_log_fsync_err(node: &mut Node, last_index: Index) -> Vec<Effect> {
     let mut effects = Vec::new();
     for p in &mut node.pending {
@@ -101,6 +121,10 @@ pub(crate) fn on_log_fsync_err(node: &mut Node, last_index: Index) -> Vec<Effect
     effects
 }
 
+/// Handles a failure to append an entry to the log file.
+///
+/// If the failed append was beyond the durable index, it truncates the in-memory log back
+/// to a safe state, increments the log generation, and replies with I/O errors to affected clients.
 pub(crate) fn on_append_log_err(node: &mut Node, from: Index) -> Vec<Effect> {
     if from > node.durable.last_index && node.log.truncate_after(Index(from.0.saturating_sub(1))) {
         node.bump_log_gen();
@@ -125,6 +149,10 @@ pub(crate) fn on_append_log_err(node: &mut Node, from: Index) -> Vec<Effect> {
     effects
 }
 
+/// Handles an incoming `AppendEntries` RPC.
+///
+/// Performs term and log-matching checks. If successful, it truncates any conflicting log
+/// entries, appends new ones, and schedules an `fsync` before replying to the leader.
 pub(crate) fn on_append_entries(node: &mut Node, from: NodeId, msg: Message) -> Vec<Effect> {
     let Message::AppendEntries {
         term,
@@ -288,10 +316,24 @@ pub(crate) fn on_append_entries(node: &mut Node, from: NodeId, msg: Message) -> 
                 match_index: Index(0),
             },
         });
+    } else if node.is_mutant(Mutant::AckBeforeFsync) {
+        effects.push(Effect::Send {
+            to: from,
+            msg: Message::AppendEntriesResp {
+                term: node.current_term,
+                success: true,
+                match_index: ack_index,
+            },
+        });
     }
     effects
 }
 
+/// Handles an incoming `AppendEntriesResp` (reply) from a peer.
+///
+/// If successful, the leader updates its `match_index` and `next_index` for the peer,
+/// checks if it can advance its commit index, and sends further entries if needed.
+/// If unsuccessful, it decrements `next_index` and retries.
 pub(crate) fn on_append_entries_resp(node: &mut Node, from: NodeId, msg: Message) -> Vec<Effect> {
     let Message::AppendEntriesResp {
         term,
@@ -346,6 +388,10 @@ pub(crate) fn on_append_entries_resp(node: &mut Node, from: NodeId, msg: Message
     effects
 }
 
+/// Processes a new client request.
+///
+/// If the node is not a leader, it rejects the request. Otherwise, it checks for idempotency,
+/// appends the request to its log, and initiates an `fsync` and replication to peers.
 pub(crate) fn client_request(node: &mut Node, req: ClientReq) -> Vec<Effect> {
     if node.role != Role::Leader {
         return vec![Effect::Reply {
@@ -353,6 +399,21 @@ pub(crate) fn client_request(node: &mut Node, req: ClientReq) -> Vec<Effect> {
             request: req.request,
             resp: ClientResp::Err(ClientError::NotLeader),
         }];
+    }
+    if node.is_mutant(Mutant::GetFromMemory) {
+        if let Cmd::Get { key } = &req.cmd {
+            let resp = match node.store.get(key) {
+                Some(value) => ClientResp::Ok {
+                    value: value.clone(),
+                },
+                None => ClientResp::Err(ClientError::NotFound),
+            };
+            return vec![Effect::Reply {
+                to: req.client,
+                request: req.request,
+                resp,
+            }];
+        }
     }
     if let Some(resp) = node.idempotency.get(&(req.client, req.request)) {
         return vec![Effect::Reply {
@@ -424,6 +485,11 @@ pub(crate) fn client_request(node: &mut Node, req: ClientReq) -> Vec<Effect> {
     effects
 }
 
+/// Attempts to advance the leader's commit index.
+///
+/// Iterates over uncommitted log entries in the current term to find the highest index
+/// that has been replicated to a majority of nodes. If found, it updates the commit index
+/// and triggers application to the state machine.
 fn maybe_commit(node: &mut Node, effects: &mut Vec<Effect>) {
     if node.role != Role::Leader {
         return;
@@ -431,7 +497,9 @@ fn maybe_commit(node: &mut Node, effects: &mut Vec<Effect>) {
     let mut best = node.commit_index;
     for n in node.commit_index.0.saturating_add(1)..=node.log.last_index().0 {
         let idx = Index(n);
-        if node.log.term_at(idx) != Some(node.current_term) {
+        if node.log.term_at(idx) != Some(node.current_term)
+            && !node.is_mutant(Mutant::CommitOldTerm)
+        {
             continue;
         }
         if majority_at(node, idx) {
@@ -445,6 +513,7 @@ fn maybe_commit(node: &mut Node, effects: &mut Vec<Effect>) {
     }
 }
 
+/// Checks if the given index is replicated on a majority of cluster nodes.
 fn majority_at(node: &Node, index: Index) -> bool {
     let mut n = 0;
     if node.match_index_self >= index {
@@ -458,6 +527,10 @@ fn majority_at(node: &Node, index: Index) -> bool {
     node.is_majority(n)
 }
 
+/// Safely advances a follower's commit index based on the leader's commit index.
+///
+/// The follower's commit index is bounded by what it has durably persisted and
+/// the last index it has appended to its log.
 fn advance_follower_commit(node: &mut Node, up_to: Index) {
     let cap = up_to
         .min(node.durable.last_index)
@@ -467,6 +540,10 @@ fn advance_follower_commit(node: &mut Node, up_to: Index) {
     }
 }
 
+/// Applies all newly committed log entries to the key-value state machine.
+///
+/// For client requests, it delegates to the KV `apply` logic. If the node is the leader,
+/// it also generates success replies for the clients.
 fn apply_committed(node: &mut Node, effects: &mut Vec<Effect>) {
     while node.last_applied < node.commit_index {
         node.last_applied = Index(node.last_applied.0.saturating_add(1));
@@ -480,13 +557,13 @@ fn apply_committed(node: &mut Node, effects: &mut Vec<Effect>) {
                 request,
                 cmd,
             } => {
-                let resp = apply(
-                    &mut node.store,
-                    &mut node.idempotency,
-                    client,
-                    request,
-                    &cmd,
-                );
+                let mut dropped = std::collections::BTreeMap::new();
+                let table = if node.is_mutant(Mutant::DropIdempotency) {
+                    &mut dropped
+                } else {
+                    &mut node.idempotency
+                };
+                let resp = apply(&mut node.store, table, client, request, &cmd);
                 let Some(pos) = node
                     .pending
                     .iter()
@@ -508,6 +585,10 @@ fn apply_committed(node: &mut Node, effects: &mut Vec<Effect>) {
     }
 }
 
+/// Generates `n` copies of a client reply effect.
+///
+/// Used when a client retries a request multiple times while it is still pending;
+/// this ensures all pending request IDs get a response.
 pub(crate) fn reply_n(
     to: crate::types::ClientId,
     request: crate::types::RequestId,

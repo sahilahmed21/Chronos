@@ -11,11 +11,18 @@ use crate::types::Index;
 use crate::wal::record::{scan, WalRecord};
 
 impl Node {
+    /// Main entry point for advancing the node's state.
+    ///
+    /// Delegates to the free function `step`.
     pub fn step(&mut self, event: Event) -> Vec<Effect> {
         step(self, event)
     }
 }
 
+/// Advances the node's state machine based on the given event.
+///
+/// Dispatches the event to the appropriate subsystem (timers, replication, election, recovery).
+/// Returns a list of effects (I/O, messages, replies) that the environment must execute.
 pub fn step(node: &mut Node, event: Event) -> Vec<Effect> {
     match event {
         Event::TimerFired { timer } if timer == TIMER_ELECTION => {
@@ -43,16 +50,20 @@ pub fn step(node: &mut Node, event: Event) -> Vec<Effect> {
     }
 }
 
+/// Rebuilds the node's state from the durable WAL.
+///
+/// Increments the incarnation to invalidate pending I/O operations from before the crash,
+/// and replays WAL entries (metadata, log entries, and truncations) to reconstruct the log.
 fn recover(node: &mut Node, durable: Vec<u8>) -> Vec<Effect> {
     let id = node.id;
     let peers = node.peers.clone();
     let incarnation = node.incarnation.saturating_add(1);
     let reject_ok_ae = node.reject_ok_ae;
-    let skip_vote_persist = node.skip_vote_persist;
+    let mutant = node.mutant;
     *node = Node::new(id, peers);
     node.incarnation = incarnation;
     node.reject_ok_ae = reject_ok_ae;
-    node.skip_vote_persist = skip_vote_persist;
+    node.mutant = mutant;
 
     let (records, _) = scan(&durable);
     for record in records {
@@ -85,6 +96,11 @@ fn recover(node: &mut Node, durable: Vec<u8>) -> Vec<Effect> {
     effects
 }
 
+/// Handles the completion of an I/O operation.
+///
+/// Matches the I/O completion to its pending operation. If the I/O corresponds to an older
+/// incarnation (i.e. before a crash), it is ignored. Otherwise, it triggers the appropriate
+/// success or error handling logic (e.g., sending queued messages after an `fsync`).
 fn io_complete(
     node: &mut Node,
     id: crate::types::IoId,
@@ -129,6 +145,7 @@ mod tests {
     use crate::wal::record::{LogEntry, LogPayload};
     use std::collections::VecDeque;
 
+    /// Helper function to create a test `Put` client request event.
     fn put(request: u64) -> Event {
         Event::ClientRequest {
             req: ClientReq {
@@ -142,6 +159,7 @@ mod tests {
         }
     }
 
+    /// Helper function to create a test `Get` client request event.
     fn get(request: u64) -> Event {
         Event::ClientRequest {
             req: ClientReq {
@@ -152,6 +170,7 @@ mod tests {
         }
     }
 
+    /// Recursively executes all I/O effects returned from an event, simulating success or failure.
     fn drain_io(
         node: &mut Node,
         start: Vec<Effect>,
@@ -188,6 +207,7 @@ mod tests {
         replies
     }
 
+    /// Simulates a single-node election, making the node a Leader.
     fn elect_solo(node: &mut Node) {
         let effects = node.step(Event::TimerFired {
             timer: TIMER_ELECTION,
@@ -196,6 +216,7 @@ mod tests {
         assert_eq!(node.role(), Role::Leader);
     }
 
+    /// Creates and returns a single-node cluster already in the Leader state.
     fn solo_leader() -> Node {
         let mut node = Node::new(NodeId(0), Vec::new());
         node.step(Event::Recover { durable: vec![] });
@@ -203,6 +224,7 @@ mod tests {
         node
     }
 
+    /// Drives a node with a starting event and specific I/O success parameters.
     fn drive_results(
         node: &mut Node,
         start: Event,
@@ -213,10 +235,12 @@ mod tests {
         drain_io(node, effects, append_ok, fsync_ok)
     }
 
+    /// Drives a node assuming appends are always successful.
     fn drive(node: &mut Node, start: Event, fsync_ok: bool) -> Vec<ClientResp> {
         drive_results(node, start, true, fsync_ok)
     }
 
+    /// Extracts the `IoId`s corresponding to `Fsync` operations.
     fn fsync_ids(effects: &[Effect]) -> Vec<crate::types::IoId> {
         effects
             .iter()
@@ -230,6 +254,7 @@ mod tests {
             .collect()
     }
 
+    /// Extracts the `IoId`s corresponding to `Append` operations.
     fn append_ids(effects: &[Effect]) -> Vec<crate::types::IoId> {
         effects
             .iter()
@@ -517,6 +542,7 @@ mod tests {
         )));
     }
 
+    /// Helper function to create an `AppendEntries` message with a NoOp entry.
     fn ae_noop(term: u64) -> Message {
         Message::AppendEntries {
             term: Term(term),
@@ -530,6 +556,7 @@ mod tests {
         }
     }
 
+    /// Checks if a list of effects contains a successful `AppendEntriesResp`.
     fn has_ae_success(effects: &[Effect]) -> bool {
         effects.iter().any(|e| {
             matches!(

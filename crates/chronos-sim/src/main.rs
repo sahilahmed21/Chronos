@@ -11,12 +11,15 @@ use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
+use chronos_protocol::Mutant;
+
 use chronos_sim::{
     aggregate_coverage, digest_hex, fail_file_header, format_coverage_table, format_fail_file,
     format_min_schedule, format_planned_schedule, format_replay_line, minify, run_seed,
-    verify_replay, Coverage, MinResult, MinifyOutcome, RunReport,
+    run_seed_mutant, verify_replay, Coverage, MinResult, MinifyOutcome, RunReport,
 };
 
+/// Main entrypoint for the `chronos-sim` CLI harness.
 fn main() -> ExitCode {
     match parse_args(env::args().skip(1)) {
         Ok(cmd) => run_cmd(cmd),
@@ -31,6 +34,7 @@ fn main() -> ExitCode {
 const USAGE: &str = "\
 chronos-sim --seed <u64> [--out <dir>]
 chronos-sim --seeds <n> [--start <u64>] [--out <dir>] [--coverage]
+chronos-sim --mutant <name> --seeds <n> [--start <u64>]   (needs --features mutants)
 chronos-sim --replay <file>
 chronos-sim --minify --seed <u64> [--out <dir>]
 
@@ -49,6 +53,11 @@ enum Cmd {
         out: PathBuf,
         coverage: bool,
     },
+    Mutant {
+        mutant: Mutant,
+        start: u64,
+        count: u64,
+    },
     Replay {
         path: PathBuf,
     },
@@ -58,6 +67,7 @@ enum Cmd {
     },
 }
 
+/// Parses command-line arguments into a structured `Cmd` configuration.
 fn parse_args(args: impl IntoIterator<Item = String>) -> Result<Cmd, String> {
     let mut seed = None;
     let mut seeds = None;
@@ -65,6 +75,7 @@ fn parse_args(args: impl IntoIterator<Item = String>) -> Result<Cmd, String> {
     let mut replay = None;
     let mut minify_mode = false;
     let mut coverage = false;
+    let mut mutant = None;
     let mut out = PathBuf::from(".");
     let mut it = args.into_iter();
     while let Some(arg) = it.next() {
@@ -87,12 +98,35 @@ fn parse_args(args: impl IntoIterator<Item = String>) -> Result<Cmd, String> {
             "--coverage" => {
                 coverage = true;
             }
+            "--mutant" => {
+                let name = next(&mut it, "--mutant")?;
+                mutant = Some(Mutant::from_name(&name).ok_or_else(|| {
+                    format!(
+                        "unknown mutant {name}; one of {:?}",
+                        Mutant::ALL.map(Mutant::name)
+                    )
+                })?);
+            }
             "--out" => {
                 out = PathBuf::from(next(&mut it, "--out")?);
             }
             "-h" | "--help" => return Err("usage".into()),
             other => return Err(format!("unknown argument: {other}")),
         }
+    }
+    if let Some(mutant) = mutant {
+        if !cfg!(feature = "mutants") {
+            return Err("--mutant requires building with --features mutants".into());
+        }
+        let count = seeds.ok_or_else(|| "--mutant requires --seeds".to_string())?;
+        if count == 0 || seed.is_some() || replay.is_some() || coverage || minify_mode {
+            return Err("--mutant takes only --seeds (>0) and --start".into());
+        }
+        return Ok(Cmd::Mutant {
+            mutant,
+            start,
+            count,
+        });
     }
     if coverage && seeds.is_none() {
         return Err("--coverage requires --seeds".into());
@@ -130,15 +164,18 @@ fn parse_args(args: impl IntoIterator<Item = String>) -> Result<Cmd, String> {
     })
 }
 
+/// Helper to extract the next argument value from the iterator, returning an error if missing.
 fn next(it: &mut impl Iterator<Item = String>, flag: &str) -> Result<String, String> {
     it.next().ok_or_else(|| format!("{flag} requires a value"))
 }
 
+/// Parses a string into a `u64`, with context-aware error formatting.
 fn parse_u64(s: &str, flag: &str) -> Result<u64, String> {
     s.parse()
         .map_err(|_| format!("{flag}: expected u64, got {s}"))
 }
 
+/// Executes the requested simulation command (One, Batch, Replay, or Minify).
 fn run_cmd(cmd: Cmd) -> ExitCode {
     match cmd {
         Cmd::One { seed, out } => {
@@ -185,6 +222,38 @@ fn run_cmd(cmd: Cmd) -> ExitCode {
                 ExitCode::from(1)
             } else {
                 ExitCode::SUCCESS
+            }
+        }
+        Cmd::Mutant {
+            mutant,
+            start,
+            count,
+        } => {
+            let mut detected = 0u64;
+            let mut first = None;
+            let mut checks: Vec<String> = Vec::new();
+            for i in 0..count {
+                let seed = start.saturating_add(i);
+                if let Some(fail) = run_seed_mutant(seed, mutant).check {
+                    detected += 1;
+                    first.get_or_insert(seed);
+                    let name = format!("{:?}", fail.check);
+                    if !checks.contains(&name) {
+                        checks.push(name);
+                    }
+                }
+            }
+            checks.sort();
+            println!(
+                "mutant={} seeds={count} start={start} detected={detected} first_seed={} checks={}",
+                mutant.name(),
+                first.map_or_else(|| "none".to_string(), |s| s.to_string()),
+                checks.join("|"),
+            );
+            if detected > 0 {
+                ExitCode::SUCCESS
+            } else {
+                ExitCode::from(1)
             }
         }
         Cmd::Replay { path } => {
@@ -249,6 +318,7 @@ fn run_cmd(cmd: Cmd) -> ExitCode {
     }
 }
 
+/// Prints a concise, single-line summary of a run report to standard output.
 fn print_report(report: &RunReport) {
     let digest = digest_hex(&report.digest);
     let c = &report.counters;
@@ -285,6 +355,7 @@ fn print_report(report: &RunReport) {
     }
 }
 
+/// Dumps the failure trace and planned schedule to disk if the run failed.
 fn maybe_dump(out: &Path, report: &RunReport) -> io::Result<()> {
     if report.check.is_none() {
         return Ok(());
@@ -309,6 +380,7 @@ fn maybe_dump(out: &Path, report: &RunReport) -> io::Result<()> {
     Ok(())
 }
 
+/// Writes the minimized schedule result to the output directory.
 fn write_min_schedule(out: &Path, result: &MinResult) -> io::Result<()> {
     if !out.as_os_str().is_empty() && out != Path::new(".") && !out.exists() {
         return Err(io::Error::new(
