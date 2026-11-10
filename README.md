@@ -1,6 +1,6 @@
 # Chronos
 
-A **simulation-first Raft key-value store**. The same protocol runs under a deterministic simulator (time, network, disk, and entropy are controlled) and under a production-style node (the OS owns files). Failures produce a **seed**, a **SHA-256 trace digest**, and a **minimized fault schedule** that can be replayed — not a one-off flake.
+A **simulation-first Raft key-value store** built to demonstrate Deterministic Simulation Testing (DST) at the protocol level. The same Raft state machine runs under a deterministic simulator — where every source of nondeterminism (time, network, disk, entropy) is controlled — and under a production-style node that uses the real OS. Failures produce a **seed**, a **SHA-256 trace digest**, and a **minimized fault schedule** that can be replayed byte-for-byte.
 
 [![CI](https://github.com/sahilahmed21/Chronos/actions/workflows/ci.yml/badge.svg)](https://github.com/sahilahmed21/Chronos/actions/workflows/ci.yml)
 
@@ -24,7 +24,7 @@ A **simulation-first Raft key-value store**. The same protocol runs under a dete
 
 ## What it does
 
-Chronos treats correctness as a product: the Raft + KV state machine never touches the wall clock, sockets, or the filesystem. Interpreters apply `Effect`s. The simulator explores schedules with a seeded PRNG, checks Raft safety and linearizability, and dumps reproducible artifacts on failure.
+Chronos treats correctness as a first-class product concern: the Raft + KV state machine never touches the wall clock, sockets, or filesystem directly. All I/O is expressed as `Effect`s interpreted by the runtime. The simulator explores schedules with a seeded PRNG, checks Raft safety and linearizability after every event, and dumps reproducible artifacts on failure.
 
 **Checked invariants:** Election Safety · Leader Append-Only · Log Matching · Leader Completeness · State Machine Safety · persist-before-send / persist-before-ack · client-history linearizability.
 
@@ -38,11 +38,40 @@ Design reference: [docs/02-architecture.md](docs/02-architecture.md).
 
 ## Results
 
-- **Determinism:** `cargo run -p chronos-sim --release -- --seed 7` twice produces the same SHA-256 digest (no host paths or wall clock in the hash).
+- **Determinism:** `cargo run -p chronos-sim --release -- --seed 7` produces the same SHA-256 digest across runs on the same commit (no host paths or wall clock in the hash).
 - **CI:** `ci / verify` on `main` runs format checks, `cargo test --workspace --release`, clippy (`-D warnings`), determinism gates, and a swarm batch — [workflow](https://github.com/sahilahmed21/Chronos/actions/workflows/ci.yml).
 - **Swarm at scale:** a **1000-seed** run with coverage completed successfully on GitHub Actions ([example run](https://github.com/sahilahmed21/Chronos/actions/runs/32767856965); log reports `# coverage runs=1000`).
-- **Harness proof:** skipping durable `votedFor` persist fails Election Safety; the unplanted control stays clean. Pack: [docs/bugs/2026-08-24-planted-skip-vote-persist/](docs/bugs/2026-08-24-planted-skip-vote-persist/). The hook is never enabled in swarm or CLI minify.
-- **Oracle hardening:** a swarm Linearizability failure on seed 281 was traced to treating fsync `Io` errors as definite misses when the put may already have applied. The checker now treats `Io` as unknown (apply or skip). After the fix, seed 281 and the 1000-seed batch are clean. Notes: [docs/bugs/HUNT-2026-08-24.md](docs/bugs/HUNT-2026-08-24.md).
+- **Harness proof:** skipping durable `votedFor` persist fails Election Safety; the unplanted control stays clean. The hook exists only in builds with `--features chronos-sim/mutants` ([ADR-0002](docs/adr/0002-feature-gated-mutants.md)); default builds panic if one is selected, and swarm/CLI minify never select one.
+- **Oracle hardening:** a Linearizability failure on seed 281 was traced to treating fsync `Io` errors as definite misses when the put may already have applied. The checker now treats `Io` as unknown. After the fix, seed 281 and the 1000-seed batch are clean.
+
+
+---
+
+## Oracle detection power
+
+Six deliberate protocol bugs ("mutants") are compiled in only with the `mutants` feature. Each was run through the swarm with the bug active on every node (`chronos-sim --mutant <name> --seeds N`, release build, WSL2 Ubuntu, 2026-11-10, `--start 0`). The unmutated code stays clean over the same seeds (the 1000-seed CI swarm, plus the test `clean_swarm_stays_clean_with_the_feature_compiled_in`).
+
+| Mutant | Bug | Seeds run | Detected | First seed | Check that fired |
+|---|---|---|---|---|---|
+| `skip-vote-persist` | vote sent/granted before term+votedFor fsync | 2,000 | 2,000 | 0 | PersistBeforeSend |
+| `ack-before-fsync` | follower acks AppendEntries before fsync | 2,000 | 1,580 | 0 | PersistBeforeAck |
+| `commit-old-term` | leader commits old-term entries by counting replicas (Figure 8) | 100,000 | 185 | 227 | CurrentTermCommit, Linearizability |
+| `get-from-memory` | leader serves Get from memory, not the log | 100,000 | 59 | 148 | Linearizability |
+| `no-leader-noop` | new leader skips the current-term no-op | 100,000 | 12 | 5,287 | Linearizability |
+| `drop-idempotency` | state machine ignores the idempotency table | 100,000 | 9 | 28,061 | Linearizability |
+
+Four of six are rare: detection rates from 0.185% down to 0.009% mean the default 1000-seed CI swarm would usually miss them. The nightly swarm stays at 1000 seeds; the pinned first-detection seeds above are regression tests (`crates/chronos-sim/tests/mutants.rs`). Measured throughput is about 2 ms per seed (20,000 seeds in 40.6 s).
+
+## Agent harness
+
+[`agent/`](agent/README.md) applies the same method (seed, trace digest, delta debugging) to tool-using LLM agents: seeded tool faults, invariants, shrinking, record/replay (including cut-point replay) of model calls, OpenTelemetry-style span export, and a bubblewrap command sandbox with a [threat model](docs/threat-model.md). Try `python -m chronos_agent demo` from `agent/`. Scripted agents only; no live-model run has been executed.
+
+## Limitations
+
+- Swarm workloads are small: at most 40 client ops per run (8 to 32 typical), two keys, a 5 s virtual horizon in brutal runs. The linearizability checker caps at 48 ops.
+- Coverage counts which fault types fired, not protocol states reached.
+- No real (unplanted) protocol bug has been found; the mutant table measures the oracles against known bugs only.
+- Static membership, no snapshots, no ReadIndex; `chronos-node` is a single-process WAL demo.
 
 ---
 
@@ -57,18 +86,11 @@ cargo test --workspace --release
 cargo clippy -p chronos-protocol -p chronos-sim --all-targets -- -D warnings
 ```
 
-Without a local MSVC linker on Windows, use Docker (PowerShell; forward slashes on the mount):
+On Windows without a local MSVC linker, use Docker:
 
 ```bash
 docker run --rm -v c:/projects/Chronos:/work -w /work -e RUST_TEST_THREADS=1 \
   rust:1-bookworm cargo test --workspace --release
-```
-
-Determinism source gates (no `HashMap` in protocol/sim; no host I/O types in protocol):
-
-```bash
-bash scripts/check-determinism-gates.sh
-# Windows: powershell -NoProfile -File scripts/check-determinism-gates.ps1
 ```
 
 ---
@@ -81,7 +103,7 @@ bash scripts/check-determinism-gates.sh
 cargo run -p chronos-sim --release -- --seed 7
 ```
 
-Prints a SHA-256 digest for the run. Running the same seed again yields the **same** digest.
+Prints a SHA-256 digest. Running the same seed again yields the **same** digest.
 
 ### Swarm batch
 
@@ -90,7 +112,7 @@ mkdir -p traces
 cargo run -p chronos-sim --release -- --seeds 32 --start 1 --out traces --coverage
 ```
 
-Exit code `0` if every seed passes. On failure, writes `traces/fail-<seed>.trace` (and a planned schedule). `--coverage` reports configured profile knobs separately from faults that actually fired.
+Exit code `0` if every seed passes. On failure, writes `traces/fail-<seed>.trace` and a planned schedule. `--coverage` reports which fault combinations fired.
 
 ### Replay and minify
 
@@ -102,11 +124,17 @@ cargo run -p chronos-sim --release -- --minify --seed <seed> --out traces
 ### Planted Election Safety regression
 
 ```bash
-cargo test -p chronos-sim --test properties planted_skip_vote_persist_fails_election_safety -- --exact
-cargo test -p chronos-sim --test properties unplanted_solo_campaign_passes_persist_before_send -- --exact
+cargo test -p chronos-sim --features mutants --test properties planted_skip_vote_persist_fails_election_safety -- --exact
+cargo test -p chronos-sim --features mutants --test properties unplanted_solo_campaign_passes_persist_before_send -- --exact
 ```
 
-The planted hook is test-only and is never enabled in swarm or CLI minify. Pack: [docs/bugs/2026-08-24-planted-skip-vote-persist/](docs/bugs/2026-08-24-planted-skip-vote-persist/).
+The planted hook needs `--features mutants` and is never enabled in swarm or CLI minify.
+
+### Mutant detection
+
+```bash
+cargo run -p chronos-sim --release --features mutants -- --mutant commit-old-term --seeds 100000
+```
 
 ### Single-node WAL
 
@@ -132,7 +160,7 @@ CI runs **32** seeds on push/PR and **1000** seeds on the nightly schedule (and 
 
 ---
 
-## Architecture (brief)
+## Architecture
 
 1. **`chronos-protocol`** — `step(state, event) → Vec<Effect>`. No clocks, sockets, files, threads, or `HashMap`.
 2. **`chronos-sim`** — single-threaded tickless scheduler (heap key `(time, global seq)`), seeded RNG, simulated net/disk, checkers, swarm, minify.
@@ -146,11 +174,10 @@ Disk model: process-visible buffer vs durable watermark; torn writes only past t
 
 | Document | Contents |
 |----------|----------|
-| [docs/02-architecture.md](docs/02-architecture.md) | Locked design (D1–D17) |
-| [docs/roadmap/](docs/roadmap/README.md) | Goals and phase sequence |
-| [docs/roadmap/deliverable.md](docs/roadmap/deliverable.md) | v1 definition of done |
-| [docs/roadmap/completion.md](docs/roadmap/completion.md) | Goals achieved and why v1 is complete |
-| [docs/bugs/](docs/bugs/README.md) | Finding packs and hunt notes |
+| [docs/00-project-guide.md](docs/00-project-guide.md) | Problem statement, architecture overview, and Raft primer |
+| [docs/01-understanding.md](docs/01-understanding.md) | Shared vocabulary — DST, Raft safety properties, product constraints |
+| [docs/02-architecture.md](docs/02-architecture.md) | Locked design decisions (D1–D17) — the architectural constitution |
+| [docs/03-research.md](docs/03-research.md) | Prior art survey — FoundationDB, TigerBeetle, Dropbox Nucleus, PAR |
 
 ---
 

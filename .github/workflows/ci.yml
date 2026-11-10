@@ -18,6 +18,19 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  agent:
+    name: agent-harness
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - name: Test
+        working-directory: agent
+        run: PYTHONPATH=. uv run --no-project --with pytest --with httpx python -m pytest tests -q
+      - name: Detection table (fails if a planted bug is missed or the control fires)
+        working-directory: agent
+        run: PYTHONPATH=. uv run --no-project --with httpx python -m chronos_agent detect --seeds 2000
+
   verify:
     name: verify
     runs-on: ubuntu-latest
@@ -41,8 +54,16 @@ jobs:
           RUST_TEST_THREADS: "1"
         run: cargo test --workspace --release
 
+      - name: Test with deliberate-bug hooks (planted regressions, ADR-0002)
+        timeout-minutes: 30
+        env:
+          RUST_TEST_THREADS: "1"
+        run: cargo test --workspace --release --features chronos-sim/mutants
+
       - name: Clippy (protocol + sim)
-        run: cargo clippy -p chronos-protocol -p chronos-sim --all-targets -- -D warnings
+        run: |
+          cargo clippy -p chronos-protocol -p chronos-sim --all-targets -- -D warnings
+          cargo clippy -p chronos-protocol -p chronos-sim --all-targets --features chronos-sim/mutants -- -D warnings
 
       - name: Determinism gates (HashMap / host I/O)
         run: bash scripts/check-determinism-gates.sh
