@@ -16,7 +16,7 @@ use chronos_protocol::Mutant;
 use chronos_sim::{
     aggregate_coverage, digest_hex, fail_file_header, format_coverage_table, format_fail_file,
     format_min_schedule, format_planned_schedule, format_replay_line, minify, run_seed,
-    run_seed_mutant, verify_replay, Coverage, MinResult, MinifyOutcome, RunReport,
+    run_seed_mutant_with, verify_replay, Coverage, MinResult, MinifyOutcome, RunReport, Workload,
 };
 
 /// Main entrypoint for the `chronos-sim` CLI harness.
@@ -34,7 +34,7 @@ fn main() -> ExitCode {
 const USAGE: &str = "\
 chronos-sim --seed <u64> [--out <dir>]
 chronos-sim --seeds <n> [--start <u64>] [--out <dir>] [--coverage]
-chronos-sim --mutant <name> --seeds <n> [--start <u64>]   (needs --features mutants)
+chronos-sim --mutant <name> --seeds <n> [--start <u64>] [--ops <n<=40>] [--keys <1..=8>] [--horizon-ms <n>]   (needs --features mutants)
 chronos-sim --replay <file>
 chronos-sim --minify --seed <u64> [--out <dir>]
 
@@ -57,6 +57,7 @@ enum Cmd {
         mutant: Mutant,
         start: u64,
         count: u64,
+        workload: Workload,
     },
     Replay {
         path: PathBuf,
@@ -76,6 +77,7 @@ fn parse_args(args: impl IntoIterator<Item = String>) -> Result<Cmd, String> {
     let mut minify_mode = false;
     let mut coverage = false;
     let mut mutant = None;
+    let mut workload = Workload::default();
     let mut out = PathBuf::from(".");
     let mut it = args.into_iter();
     while let Some(arg) = it.next() {
@@ -107,6 +109,27 @@ fn parse_args(args: impl IntoIterator<Item = String>) -> Result<Cmd, String> {
                     )
                 })?);
             }
+            "--ops" => {
+                let n = parse_u64(&next(&mut it, "--ops")?, "--ops")?;
+                if n == 0 || n > 40 {
+                    return Err("--ops must be 1..=40 (48-op linearizability cap)".into());
+                }
+                workload.ops = Some(n as usize);
+            }
+            "--keys" => {
+                let n = parse_u64(&next(&mut it, "--keys")?, "--keys")?;
+                if n == 0 || n > 8 {
+                    return Err("--keys must be 1..=8".into());
+                }
+                workload.keys = n as usize;
+            }
+            "--horizon-ms" => {
+                let ms = parse_u64(&next(&mut it, "--horizon-ms")?, "--horizon-ms")?;
+                if ms < 500 {
+                    return Err("--horizon-ms must be >= 500".into());
+                }
+                workload.horizon_ns = Some(ms.saturating_mul(1_000_000));
+            }
             "--out" => {
                 out = PathBuf::from(next(&mut it, "--out")?);
             }
@@ -126,7 +149,11 @@ fn parse_args(args: impl IntoIterator<Item = String>) -> Result<Cmd, String> {
             mutant,
             start,
             count,
+            workload,
         });
+    }
+    if workload != Workload::default() {
+        return Err("--ops, --keys and --horizon-ms only apply with --mutant".into());
     }
     if coverage && seeds.is_none() {
         return Err("--coverage requires --seeds".into());
@@ -228,13 +255,14 @@ fn run_cmd(cmd: Cmd) -> ExitCode {
             mutant,
             start,
             count,
+            workload,
         } => {
             let mut detected = 0u64;
             let mut first = None;
             let mut checks: Vec<String> = Vec::new();
             for i in 0..count {
                 let seed = start.saturating_add(i);
-                if let Some(fail) = run_seed_mutant(seed, mutant).check {
+                if let Some(fail) = run_seed_mutant_with(seed, mutant, &workload).check {
                     detected += 1;
                     first.get_or_insert(seed);
                     let name = format!("{:?}", fail.check);
@@ -245,8 +273,11 @@ fn run_cmd(cmd: Cmd) -> ExitCode {
             }
             checks.sort();
             println!(
-                "mutant={} seeds={count} start={start} detected={detected} first_seed={} checks={}",
+                "mutant={} ops={} keys={} horizon_ms={} seeds={count} start={start} detected={detected} first_seed={} checks={}",
                 mutant.name(),
+                workload.ops.map_or_else(|| "default".to_string(), |n| n.to_string()),
+                if workload.keys == 0 { "default".to_string() } else { workload.keys.to_string() },
+                workload.horizon_ns.map_or_else(|| "default".to_string(), |n| (n / 1_000_000).to_string()),
                 first.map_or_else(|| "none".to_string(), |s| s.to_string()),
                 checks.join("|"),
             );

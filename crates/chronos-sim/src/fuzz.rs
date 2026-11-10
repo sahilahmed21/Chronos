@@ -285,8 +285,28 @@ pub fn encode_config(cfg: &SimConfig) -> Vec<u8> {
     buf
 }
 
+/// Workload overrides for detection-power experiments. `Default` changes nothing: the
+/// RNG stream and every digest match `swarm_plan`. `ops` stays <= `MAX_CLIENT_OPS`
+/// (the 48-op linearizability cap would otherwise abort the run and look like a detection).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Workload {
+    /// Exact client ops per run (replaces the 8..16 / 16..32 draw).
+    pub ops: Option<usize>,
+    /// Distinct keys. 0 keeps the default two-key coin flip. Max 8.
+    pub keys: usize,
+    /// Virtual horizon in ns for every profile.
+    pub horizon_ns: Option<u64>,
+}
+
+const KEY_NAMES: [&[u8]; 8] = [b"k", b"m", b"n", b"p", b"q", b"r", b"s", b"t"];
+
 /// Generates a randomized fuzzing plan (configuration and events) from a given seed.
 pub fn swarm_plan(seed: u64) -> SwarmPlan {
+    swarm_plan_with(seed, &Workload::default())
+}
+
+/// `swarm_plan` with workload overrides.
+pub fn swarm_plan_with(seed: u64, w: &Workload) -> SwarmPlan {
     let mut rng = Rng::new(seed);
     let profile = if rng.bool(500_000) {
         Profile::Brutal
@@ -321,7 +341,7 @@ pub fn swarm_plan(seed: u64) -> SwarmPlan {
         net_delay_min_ns: 0,
         net_delay_max_ns: net_max,
         jitter_max_ns: jitter_max,
-        max_ns,
+        max_ns: w.horizon_ns.unwrap_or(max_ns),
         drop_ppm,
         dup_ppm,
         torn_suffix: true,
@@ -335,7 +355,7 @@ pub fn swarm_plan(seed: u64) -> SwarmPlan {
         check_engineering: true,
         check_liveness: false,
     };
-    let extras = plan_extras(&mut rng, profile, &cfg);
+    let extras = plan_extras(&mut rng, profile, &cfg, w);
     SwarmPlan {
         profile,
         cfg,
@@ -364,7 +384,12 @@ pub fn run_plan(
 /// Same as `run_seed` with `mutant` active on every node (ADR-0002). Needs the
 /// `mutants` feature; panics otherwise.
 pub fn run_seed_mutant(seed: u64, mutant: Mutant) -> RunReport {
-    let plan = swarm_plan(seed);
+    run_seed_mutant_with(seed, mutant, &Workload::default())
+}
+
+/// `run_seed_mutant` with workload overrides.
+pub fn run_seed_mutant_with(seed: u64, mutant: Mutant, w: &Workload) -> RunReport {
+    let plan = swarm_plan_with(seed, w);
     let cluster = drain_plan_with(seed, &plan.cfg, &plan.extras, &[], Some(mutant));
     finish_report(seed, plan.profile, plan.cfg, plan.extras, &cluster)
 }
@@ -635,7 +660,12 @@ fn parse_hex(s: &str) -> Option<Vec<u8>> {
 }
 
 /// Stochastically plans the extra injected faults (crashes, partitions, clients) for a fuzz run.
-fn plan_extras(rng: &mut Rng, profile: Profile, cfg: &SimConfig) -> Vec<(Timestamp, WorldEvent)> {
+fn plan_extras(
+    rng: &mut Rng,
+    profile: Profile,
+    cfg: &SimConfig,
+    w: &Workload,
+) -> Vec<(Timestamp, WorldEvent)> {
     let mut extras = Vec::new();
     let mut downs: Vec<(NodeId, u64, u64)> = Vec::new();
     let n_crash = match profile {
@@ -729,10 +759,11 @@ fn plan_extras(rng: &mut Rng, profile: Profile, cfg: &SimConfig) -> Vec<(Timesta
         extras.push((at, WorldEvent::FailNextFsync { node }));
     }
 
-    let n_ops = match profile {
-        Profile::Calm => rng.delay_ns(8, 16),
-        Profile::Brutal => rng.delay_ns(16, 32),
-    } as usize;
+    let n_ops = match (w.ops, profile) {
+        (Some(n), _) => n,
+        (None, Profile::Calm) => rng.delay_ns(8, 16) as usize,
+        (None, Profile::Brutal) => rng.delay_ns(16, 32) as usize,
+    };
     let n_ops = n_ops.min(MAX_CLIENT_OPS);
     let mut next_req = [0u64, 1, 1];
     let mut last_client: Option<(Timestamp, WorldEvent)> = None;
@@ -749,10 +780,15 @@ fn plan_extras(rng: &mut Rng, profile: Profile, cfg: &SimConfig) -> Vec<(Timesta
         let client_i = if rng.bool(500_000) { 2 } else { 1 };
         let request = next_req[client_i];
         next_req[client_i] = request.saturating_add(1);
-        let key = if rng.bool(500_000) {
-            b"k".to_vec()
+        let key = if w.keys == 0 || w.keys == 2 {
+            if rng.bool(500_000) {
+                b"k".to_vec()
+            } else {
+                b"m".to_vec()
+            }
         } else {
-            b"m".to_vec()
+            let k = w.keys.min(KEY_NAMES.len());
+            KEY_NAMES[rng.delay_ns(0, k as u64 - 1) as usize].to_vec()
         };
         let cmd = if rng.bool(250_000) {
             Cmd::Get { key }
@@ -1012,6 +1048,26 @@ mod tests {
             .iter()
             .filter(|(_, e)| matches!(e, WorldEvent::ClientInject { .. }))
             .count()
+    }
+
+    #[test]
+    fn default_workload_is_the_same_plan_and_overrides_apply() {
+        for seed in 0..50 {
+            assert_eq!(
+                swarm_plan(seed),
+                swarm_plan_with(seed, &Workload::default())
+            );
+        }
+        let w = Workload {
+            ops: Some(30),
+            keys: 4,
+            horizon_ns: Some(1_000_000_000),
+        };
+        let plan = swarm_plan_with(3, &w);
+        assert_eq!(plan.cfg.max_ns, 1_000_000_000);
+        assert!(client_op_count(&plan.extras) >= 30);
+        assert!(client_op_count(&plan.extras) <= MAX_CLIENT_OPS + 1);
+        assert!(timestamps_within(&plan.extras, plan.cfg.max_ns));
     }
 
     #[test]
