@@ -5,7 +5,7 @@ import time
 
 import pytest
 
-from chronos_agent import sandbox
+from chronos_agent.experimental import sandbox
 
 pytestmark = pytest.mark.skipif(not sandbox.available(), reason="needs Linux with working bubblewrap")
 

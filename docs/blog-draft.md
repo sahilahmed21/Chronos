@@ -1,6 +1,6 @@
 # DRAFT: Your agent's retry is a distributed-systems bug
 
-Status: draft for the author to rewrite in their own voice. Every number below was measured with scripted agents; the live-model section is a placeholder and must not be published until it is filled in with a real run.
+Status: draft for the author to rewrite in their own voice. Every number below was measured with scripted agents, not a real model. Record/replay and real-model evals live in Atlas, a separate repo.
 
 ## The failure
 
@@ -34,8 +34,7 @@ Over 1,000 fault schedules per profile, the reference agent succeeds 100% / 93% 
 ## What this does not show
 
 - The agents above are scripted functions, so pass^k here measures robustness to faults, not model sampling noise.
-- LIVE MODEL SECTION: not run yet. To fill in: record one real run with `llm_agent` through `Recorder`, replay it with zero model calls and a stable digest, report per-step tokens, latency and cost from `recorder.attribute`, and the observed pass^k with its interval. State the model, date and total spend.
-- Replay shows what happened, not why, and cannot validate a prompt change.
+- No real model is involved here. For record/replay of model calls and evals against a real model, see Atlas (separate repo); Chronos does not duplicate that.
 
 ## Prior art
 

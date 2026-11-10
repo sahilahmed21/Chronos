@@ -1,4 +1,6 @@
-# Threat model: sandboxed command execution (`agent/chronos_agent/sandbox.py`)
+# Threat model: sandboxed command execution (`agent/chronos_agent/experimental/sandbox.py`)
+
+> **EXPERIMENTAL.** This is an extra, not part of Chronos' headline (deterministic simulation testing with measured oracle detection power). It is not claimed anywhere in the README. It is kept because its tests found a real gap (a writable root filesystem, fixed with `--remount-ro /`).
 
 Scope: an agent's "run this command" tool. The command is untrusted (it may be written by a model that read prompt-injected text). Not in scope: the model API, the agent's own process, tools other than command execution.
 
@@ -8,7 +10,7 @@ Scope: an agent's "run this command" tool. The command is untrusted (it may be w
 
 ## Containment tests (executed 2026-11-10, WSL2 Ubuntu, bubblewrap from apt)
 
-Source: `agent/tests/test_sandbox.py`. All 8 pass. On hosts without working bubblewrap or unprivileged user namespaces the tests skip (`sandbox.available()` probes this).
+Source: `agent/tests/experimental/test_sandbox.py`. All 8 pass. On hosts without working bubblewrap or unprivileged user namespaces the tests skip (`sandbox.available()` probes this).
 
 | Attack or failure | Expected | Observed |
 |---|---|---|

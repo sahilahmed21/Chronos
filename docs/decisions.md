@@ -22,7 +22,7 @@ Fill in each answer yourself, in under five lines and without looking at the cod
    -
 10. How long does the idempotency table live, and what changes when snapshots exist?
    -
-11. Agent harness: why can replay not validate a fix, and why does `pass^k` here not measure model variance?
+11. Agent harness: why does `pass^k` here not measure model variance?
    -
-12. What stops a prompt-injected tool result from becoming a privileged call, and what does the sandbox not stop?
+12. (Optional, experimental extra.) What stops a prompt-injected tool result from becoming a privileged call, and what does the sandbox not stop?
    -

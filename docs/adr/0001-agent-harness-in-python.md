@@ -1,7 +1,7 @@
 # ADR-0001: Build the agent reliability harness in Python
 
 **Date**: 2026-11-10
-**Status**: accepted
+**Status**: accepted, partly superseded 2026-11-10. The recorder, `llm_agent` and OTel export described below were removed from Chronos; record/replay and real-model evals now live in Atlas (a separate repo). The language decision (Python) and the fault-injection and shrinking parts stand.
 **Deciders**: Sahil
 
 ## Context
