@@ -1,8 +1,45 @@
 # Chronos
 
-A **simulation-first Raft key-value store** built to demonstrate Deterministic Simulation Testing (DST) at the protocol level. The same Raft state machine runs under a deterministic simulator — where every source of nondeterminism (time, network, disk, entropy) is controlled — and under a production-style node that uses the real OS. Failures produce a **seed**, a **SHA-256 trace digest**, and a **minimized fault schedule** that can be replayed byte-for-byte.
+**Deterministic simulation testing for a Raft key-value store, with measured oracle detection power.** The same Raft state machine runs under a deterministic simulator — where every source of nondeterminism (time, network, disk, entropy) is controlled — and under a production-style node that uses the real OS. Failures produce a **seed**, a **SHA-256 trace digest**, and a **minimized fault schedule** that can be replayed byte-for-byte. Chronos also measures how good its own checkers are: it plants known protocol bugs and counts how many seeds it takes to catch each.
 
 [![CI](https://github.com/sahilahmed21/Chronos/actions/workflows/ci.yml/badge.svg)](https://github.com/sahilahmed21/Chronos/actions/workflows/ci.yml)
+
+## Oracle detection power
+
+Six deliberate protocol bugs ("mutants") are compiled in only with the `mutants` feature ([ADR-0002](docs/adr/0002-feature-gated-mutants.md)). Each was run through the swarm with the bug active on every node (`chronos-sim --mutant <name> --seeds N`, release build, WSL2 Ubuntu, 2026-11-10, `--start 0`). The unmutated code stays clean over the same seeds (the 1000-seed CI swarm, plus the test `clean_swarm_stays_clean_with_the_feature_compiled_in`).
+
+| Mutant | Bug | Seeds run | Detected | First seed | Check that fired |
+|---|---|---|---|---|---|
+| `skip-vote-persist` | vote sent/granted before term+votedFor fsync | 2,000 | 2,000 | 0 | PersistBeforeSend |
+| `ack-before-fsync` | follower acks AppendEntries before fsync | 2,000 | 1,580 | 0 | PersistBeforeAck |
+| `commit-old-term` | leader commits old-term entries by counting replicas (Figure 8) | 100,000 | 185 | 227 | CurrentTermCommit, Linearizability |
+| `get-from-memory` | leader serves Get from memory, not the log | 100,000 | 59 | 148 | Linearizability |
+| `no-leader-noop` | new leader skips the current-term no-op | 100,000 | 12 | 5,287 | Linearizability |
+| `drop-idempotency` | state machine ignores the idempotency table | 100,000 | 9 | 28,061 | Linearizability |
+
+**Why the nightly runs 100,000 rotating seeds.** The nightly used to run seeds 1..1000 (`--start 1`), the same seeds every night. Run against each mutant, that range detects `skip-vote-persist` on 1000/1000 seeds, `ack-before-fsync` on 789, `commit-old-term` on 4 (first seed 227), `get-from-memory` on exactly 1 (seed 148), and `no-leader-noop` and `drop-idempotency` on none. So it caught four of six, two of them only by luck of the range, missed two, and could never find anything new. On a fresh 1,000 seeds, the chance of at least one hit is about 84% for `commit-old-term`, 45% for `get-from-memory`, 11% for `no-leader-noop` and 9% for `drop-idempotency` (from the rates above). The nightly now runs 100,000 seeds starting at `run_number * 100000`, so each night covers new seeds, and it logs the start seed (job log and step summary) so any failure reproduces. A 100,000-seed run with `--coverage` took 3 min 9 s locally; GitHub runner time is untested. The pinned first-detection seeds are regression tests (`crates/chronos-sim/tests/mutants.rs`). Measured throughput is about 2 ms per seed (20,000 seeds in 40.6 s).
+
+### Does a bigger workload catch the rare four sooner?
+
+No. Detections per 100,000 seeds (first seed in parentheses), one factor changed at a time, defaults otherwise (8 to 32 ops, two keys, 2 s calm / 5 s brutal horizon). Flags: `--ops`, `--keys`, `--horizon-ms` with `--mutant`.
+
+| Workload | commit-old-term | get-from-memory | no-leader-noop | drop-idempotency |
+|---|---|---|---|---|
+| default | 185 (227) | 59 (148) | 12 (5,287) | 9 (28,061) |
+| 20 ops | 168 (227) | 45 (148) | 12 (7,088) | 10 (6,167) |
+| 40 ops | 163 (532) | 105 (125) | 11 (2,964) | 5 (9,670) |
+| 1 key | 157 (532) | 93 (479) | 7 (5,430) | 5 (5,430) |
+| 4 keys | 183 (227) | 40 (148) | 10 (4,801) | 7 (4,801) |
+| 1 s horizon | 18 (8,361) | 5 (18,822) | 1 (63,111) | 3 (27,903) |
+| 2 s horizon | 57 (3,377) | 32 (1,580) | 6 (36,406) | 6 (36,406) |
+| 10 s horizon | 151 (818) | 38 (2,876) | 10 (4,534) | 7 (23,513) |
+| 40 ops, 1 key, 2 s | 57 (71) | 90 (218) | 9 (8,830) | 7 (17,068) |
+
+Reading it: counts of 5 to 12 carry Poisson noise of roughly ±2 to ±4, so most cells match the default. Only `get-from-memory` moves clearly (105 at 40 ops, 93 at one key, about 1.6x to 1.8x). A short horizon is clearly worse, and nothing helps `no-leader-noop` or `drop-idempotency`. I did not test why: the likely limit is the fault timing needed (a leader change at the wrong moment), not the amount of client load. The default workload stays. What would help is more seeds: 100,000 seeds takes about 200 s and catches all four.
+
+## Agent harness (scripted agents only)
+
+[`agent/`](agent/README.md) applies the same method (seed, trace digest, delta debugging) to tool-using agents: seeded tool faults, invariants, and shrinking of the fault schedule. **Every agent number comes from scripted Python agents, not a real model.** Real-model evals and record/replay of model calls belong to Atlas, a separate repo. Try `python -m chronos_agent demo` from `agent/`.
 
 ```text
                     chronos-sim                 chronos-node
@@ -46,25 +83,6 @@ Design reference: [docs/02-architecture.md](docs/02-architecture.md).
 
 
 ---
-
-## Oracle detection power
-
-Six deliberate protocol bugs ("mutants") are compiled in only with the `mutants` feature. Each was run through the swarm with the bug active on every node (`chronos-sim --mutant <name> --seeds N`, release build, WSL2 Ubuntu, 2026-11-10, `--start 0`). The unmutated code stays clean over the same seeds (the 1000-seed CI swarm, plus the test `clean_swarm_stays_clean_with_the_feature_compiled_in`).
-
-| Mutant | Bug | Seeds run | Detected | First seed | Check that fired |
-|---|---|---|---|---|---|
-| `skip-vote-persist` | vote sent/granted before term+votedFor fsync | 2,000 | 2,000 | 0 | PersistBeforeSend |
-| `ack-before-fsync` | follower acks AppendEntries before fsync | 2,000 | 1,580 | 0 | PersistBeforeAck |
-| `commit-old-term` | leader commits old-term entries by counting replicas (Figure 8) | 100,000 | 185 | 227 | CurrentTermCommit, Linearizability |
-| `get-from-memory` | leader serves Get from memory, not the log | 100,000 | 59 | 148 | Linearizability |
-| `no-leader-noop` | new leader skips the current-term no-op | 100,000 | 12 | 5,287 | Linearizability |
-| `drop-idempotency` | state machine ignores the idempotency table | 100,000 | 9 | 28,061 | Linearizability |
-
-Four of six are rare: detection rates from 0.185% down to 0.009% mean the default 1000-seed CI swarm would usually miss them. The nightly swarm stays at 1000 seeds; the pinned first-detection seeds above are regression tests (`crates/chronos-sim/tests/mutants.rs`). Measured throughput is about 2 ms per seed (20,000 seeds in 40.6 s).
-
-## Agent harness
-
-[`agent/`](agent/README.md) applies the same method (seed, trace digest, delta debugging) to tool-using LLM agents: seeded tool faults, invariants, shrinking, record/replay (including cut-point replay) of model calls, OpenTelemetry-style span export, and a bubblewrap command sandbox with a [threat model](docs/threat-model.md). Try `python -m chronos_agent demo` from `agent/`. Scripted agents only; no live-model run has been executed.
 
 ## Limitations
 
@@ -156,7 +174,7 @@ Persists to a local WAL file and serves Put/Get through the same `step` function
 | Minify | `cargo run -p chronos-sim --release -- --minify --seed <S> --out traces` |
 | Tests | `cargo test --workspace --release` |
 
-CI runs **32** seeds on push/PR and **1000** seeds on the nightly schedule (and on manual `workflow_dispatch` with `swarm_seeds=1000`). Workflow: [`.github/workflows/ci.yml`](.github/workflows/ci.yml).
+CI runs **32** seeds (`--start 1`) on push/PR and **100,000** seeds on the nightly schedule, starting at `run_number * 100000` and logged in the job summary. Manual `workflow_dispatch` takes `swarm_seeds` and `swarm_start`. Workflow: [`.github/workflows/ci.yml`](.github/workflows/ci.yml).
 
 ---
 

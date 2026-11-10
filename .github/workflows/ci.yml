@@ -9,9 +9,14 @@ on:
   workflow_dispatch:
     inputs:
       swarm_seeds:
-        description: "Swarm seed count (push/PR default 32; use 1000 for nightly-equivalent)"
+        description: "Swarm seed count (push/PR default 32; nightly runs 100000)"
         required: false
         default: "32"
+        type: string
+      swarm_start:
+        description: "First swarm seed (default 1). Use the start seed a failed nightly logged to reproduce it."
+        required: false
+        default: "1"
         type: string
 
 env:
@@ -26,10 +31,14 @@ jobs:
       - uses: astral-sh/setup-uv@v5
       - name: Test
         working-directory: agent
-        run: PYTHONPATH=. uv run --no-project --with pytest --with httpx python -m pytest tests -q
+        run: PYTHONPATH=. uv run --no-project --with pytest python -m pytest tests -q --ignore=tests/experimental
+      - name: Experimental sandbox tests (informational; hosted runners may block user namespaces)
+        continue-on-error: true
+        working-directory: agent
+        run: PYTHONPATH=. uv run --no-project --with pytest python -m pytest tests/experimental -q -rs
       - name: Detection table (fails if a planted bug is missed or the control fires)
         working-directory: agent
-        run: PYTHONPATH=. uv run --no-project --with httpx python -m chronos_agent detect --seeds 2000
+        run: PYTHONPATH=. uv run --no-project python -m chronos_agent detect --seeds 2000
 
   verify:
     name: verify
@@ -68,16 +77,25 @@ jobs:
       - name: Determinism gates (HashMap / host I/O)
         run: bash scripts/check-determinism-gates.sh
 
-      - name: Swarm seed count
+      - name: Swarm seed range
         id: swarm
         run: |
           if [ "${{ github.event_name }}" = "schedule" ]; then
-            echo "count=1000" >> "$GITHUB_OUTPUT"
+            # Rotating range: each night covers 100000 seeds nobody has run before.
+            echo "count=100000" >> "$GITHUB_OUTPUT"
+            echo "start=$(( ${{ github.run_number }} * 100000 ))" >> "$GITHUB_OUTPUT"
           elif [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             echo "count=${{ github.event.inputs.swarm_seeds || '32' }}" >> "$GITHUB_OUTPUT"
+            echo "start=${{ github.event.inputs.swarm_start || '1' }}" >> "$GITHUB_OUTPUT"
           else
             echo "count=32" >> "$GITHUB_OUTPUT"
+            echo "start=1" >> "$GITHUB_OUTPUT"
           fi
+          # Logged so a failure reproduces: chronos-sim --seed <failing seed>, or rerun this range.
+          S=$(grep '^start=' "$GITHUB_OUTPUT" | tail -1 | cut -d= -f2)
+          C=$(grep '^count=' "$GITHUB_OUTPUT" | tail -1 | cut -d= -f2)
+          echo "swarm seeds: start=$S count=$C (last=$(( S + C - 1 )))"
+          echo "swarm seeds: start=$S count=$C" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Create traces dir
         run: mkdir -p traces
@@ -87,6 +105,6 @@ jobs:
         run: >
           cargo run -p chronos-sim --release --
           --seeds ${{ steps.swarm.outputs.count }}
-          --start 1
+          --start ${{ steps.swarm.outputs.start }}
           --out traces
           --coverage
