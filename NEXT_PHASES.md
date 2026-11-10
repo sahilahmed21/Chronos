@@ -16,7 +16,7 @@ What I did not do: I did not build or run the code locally. The README says the 
 - **Phase 1 result:** all six mutants detected, but four only at 100,000 seeds (README, "Oracle detection power"). The "within 1,000 seeds" target in Phase 1 was unrealistic.
 - Still open: a live-model run (needs an API key and a spend cap), a first GitHub Actions run of the new jobs, your own answers in `docs/decisions.md`, and review of the 19 uncommitted doc-comment files.
 - **Scope narrowed (later 2026-11-10):** Chronos is now "deterministic simulation testing with measured oracle detection power". Record/replay and real-model evals moved to Atlas (a separate repo), so the live-model item above no longer belongs here.
-- **Workload experiment:** larger workloads do not catch the four rare mutants sooner (README, "Does a bigger workload catch the rare four sooner?"). The nightly runs the same seeds 1..1000 every night, so it catches four of six mutants and cannot find new ones.
+- **Workload experiment:** larger workloads do not catch the four rare mutants sooner (README, "Does a bigger workload catch the rare four sooner?"). The nightly ran the same seeds 1..1000 every night, so it caught four of six mutants and could not find new ones. Fixed: it now runs 100,000 seeds from `run_number * 100000` and logs the start seed (not yet run on GitHub).
 - **G4 resolved by removal:** `docs/bugs/` stays gitignored and local; no tracked doc links to it (the mentions below are this plan's own analysis).
 
 ## 1. Project summary and honest assessment
