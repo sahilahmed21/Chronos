@@ -1,8 +1,6 @@
 # Research Notes
 
-*Generated: 2026-08-18. Firecrawl/Exa MCP were not available; sources were gathered via web search and full-page reads. Confidence: high on architectural lessons, medium on unpublished internals (TigerBeetle VOPR source layout, Antithesis hypervisor details).*
-
-This is not a literature review for its own sake. Every source below changes a concrete decision in [02-architecture.md](02-architecture.md).
+A survey of how production systems implement Deterministic Simulation Testing, what storage faults vanilla Raft survives, and which Raft implementation details are load-bearing for safety. Every source below directly informed a concrete decision in [02-architecture.md](02-architecture.md).
 
 ## Sub-questions investigated
 
@@ -64,13 +62,13 @@ A 2026 practitioner writeup on Turmoil is blunter: `HashMap` iteration, `Instant
 
 MadSim also defaults to **forbidding OS threads** because they break determinism.
 
-**Implication for Chronos:** we are greenfield. Using MadSim/Turmoil would optimize for "looks like Tokio" and fight Windows (`libc` shims), HashMap, and a protocol that should not be async in the first place. Own the scheduler. That is also the thing an interviewer can actually audit.
+**Implication for Chronos:** Chronos is greenfield. Using MadSim/Turmoil would optimize for "looks like Tokio" and fight Windows (`libc` shims), HashMap, and a protocol that should not be async in the first place. Owning the scheduler is also what makes the implementation auditable.
 
 ## 5. Antithesis: complementary, not a substitute
 
 A [deterministic hypervisor](https://antithesis.com/blog/deterministic_hypervisor/) makes an unmodified container reproducible by intercepting syscalls, clocks, and scheduling. That is the right tool when you **cannot** control the I/O boundary.
 
-Chronos *can*. In-process DST is cheaper, faster, and teaches the architecture. Hypervisor DST / Jepsen remain the way to catch "our sim misunderstood the kernel." We do not build a hypervisor.
+Chronos *can*. In-process DST is cheaper, faster, and teaches the architecture. Hypervisor DST / Jepsen remain the way to catch "our sim misunderstood the kernel." Chronos does not build a hypervisor.
 
 ## 6. Raft load-bearing details (not trivia)
 
@@ -117,12 +115,12 @@ Banned in `chronos-sim` as well: `HashMap`/`HashSet`. The simulator's net/disk/c
 
 Use `BTreeMap` / `BTreeSet`. One PRNG. Integer nanoseconds. Clippy `disallowed_types` + CI grep; Cargo will not catch `use std::fs`.
 
-## What we are not taking
+## What Chronos deliberately excludes
 
-- **Flow / actors as a language.** We get the same shape with an explicit `step` function and a queue. Less magic, easier to audit.
+- **Flow / actors as a language.** The same shape is achieved with an explicit `step` function and a queue. Less magic, easier to audit.
 - **MadSim drop-in Tokio.** Wrong boundary for a greenfield protocol.
 - **Byzantine faults.** Raft does not claim them. Testing for them proves nothing about this protocol.
-- **Real clock drift as a continuous analog process.** We can inject discrete clock jumps later. Continuous drift is a hypervisor problem.
+- **Real clock drift as a continuous analog process.** Discrete clock jumps can be injected later. Continuous drift is a hypervisor problem.
 
 ## Sources
 
@@ -145,4 +143,4 @@ Use `BTreeMap` / `BTreeSet`. One PRNG. Integer nanoseconds. Clippy `disallowed_t
 
 ## Methodology
 
-Searched 12+ queries across web and docs. Deep-read FoundationDB testing/engineering pages, Wilson notes, FDB paper excerpts, PAR paper, Nucleus testing page, MadSim/RisingWave, Antithesis DST docs. Sub-questions listed above. Gaps: live TigerBeetle `vopr.md` fetch returned empty (GitHub blob); relied on blog + PR discussion. No Exa/Firecrawl (not configured).
+Searched 12+ queries across web and docs. Deep-read FoundationDB testing/engineering pages, Wilson notes, FDB paper excerpts, PAR paper, Nucleus testing page, MadSim/RisingWave, Antithesis DST docs. Gaps: live TigerBeetle `vopr.md` fetch returned empty (GitHub blob); relied on blog + PR discussion.

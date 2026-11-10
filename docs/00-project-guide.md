@@ -1,8 +1,9 @@
-# Deterministic Simulation Testing (DST) on a Raft KV Store — Full Project Guide
+# Deterministic Simulation Testing (DST) on a Raft KV Store — Project Guide
 
-This is the original project specification, saved verbatim as the source of intent. Architecture that we will actually build (and will not rewrite) lives in [02-architecture.md](02-architecture.md). If this guide and that file disagree (synchronous `Disk::write`, blanket persist-before-send, integer ticks, HashMap-only-in-protocol, and so on), **02-architecture.md wins**.
+This document covers the problem statement, proposed architecture, end-to-end mechanics, and a deep Raft reference. For the canonical locked design decisions, see [02-architecture.md](02-architecture.md).
 
 ---
+
 
 ## 1. Problem Statement
 
